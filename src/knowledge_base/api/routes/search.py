@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from src.knowledge_base.api.dependencies import get_graphrag_engine, get_vector_store, get_graph_engine
 from src.knowledge_base.query.graphrag_engine import GraphRAGEngine
@@ -13,6 +14,49 @@ from src.knowledge_base.rag.vector_store import VectorStore
 from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
 
 router = APIRouter(prefix="/search", tags=["search"])
+
+
+class RetrieveRequest(BaseModel):
+    query: str
+    tenant_id: Optional[str] = None
+    specialization: Optional[str] = None
+    doctor_name: Optional[str] = None
+    language: Optional[str] = None
+    min_experience: Optional[int] = None
+
+
+@router.post("/retrieve")
+async def retrieve_doctors(
+    req: RetrieveRequest,
+    engine: GraphRAGEngine = Depends(get_graphrag_engine),
+) -> dict[str, Any]:
+    """
+    Retrieval-only search: vector + graph search, no LLM calls.
+    Returns fused doctor results for the orchestrator to synthesize.
+    """
+    fused, context_text, booking_links = await engine.retrieve_context(
+        req.query, req.tenant_id,
+        specialization=req.specialization,
+        doctor_name=req.doctor_name,
+        language=req.language,
+        min_experience=req.min_experience,
+    )
+    return {
+        "doctors": [
+            {
+                "doctor_id": d.get("doctor_id") or d.get("id", ""),
+                "name": d.get("name") or d.get("doctor_name", ""),
+                "specializations": d.get("specializations", ""),
+                "experience_years": d.get("experience_years"),
+                "consultation_fee": d.get("consultation_fee"),
+                "languages": d.get("languages", ""),
+                "hospital": d.get("hospitals") or d.get("hospital_ids", ""),
+                "designation": d.get("designation", ""),
+            }
+            for d in fused
+        ],
+        "booking_links": booking_links,
+    }
 
 
 @router.get("/doctors")

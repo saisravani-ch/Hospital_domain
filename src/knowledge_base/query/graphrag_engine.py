@@ -32,7 +32,7 @@ from typing import Any
 import openai
 from loguru import logger
 
-from src.knowledge_base.config import get_settings, get_tenant_config
+from src.knowledge_base.config import get_settings, get_tenant_config, get_tenant_config_from_db, TenantConfig
 from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
 from src.knowledge_base.rag.vector_store import VectorStore
 
@@ -95,21 +95,31 @@ class GraphRAGEngine:
         vector_store: VectorStore,
         graph_engine: Neo4jQueryEngine,
         llm_client: openai.AsyncAzureOpenAI | None = None,
+        db_session: Session | None = None,
     ):
         self._vector = vector_store
         self._graph = graph_engine
+        self._db_session = db_session
         self._llm = llm_client or openai.AsyncAzureOpenAI(
             api_key=settings.azure_openai_api_key,
             azure_endpoint=settings.azure_openai_endpoint,
             api_version=settings.azure_openai_api_version,
         )
 
+    def _get_tc(self, tenant_id: str | None = None) -> TenantConfig:
+        tid = tenant_id or getattr(settings, "tenant_id", None) or ""
+        if self._db_session and tid:
+            db_tc = get_tenant_config_from_db(tid, self._db_session)
+            if db_tc:
+                return db_tc
+        return get_tenant_config(tid or None)
+
     def _build_intent_system(self, tenant_id: str | None = None) -> str:
-        tc = get_tenant_config(tenant_id)
+        tc = self._get_tc(tenant_id)
         return tc.format(TENANT_INTENT_SYSTEM)
 
     def _build_response_system(self, tenant_id: str | None = None) -> str:
-        tc = get_tenant_config(tenant_id)
+        tc = self._get_tc(tenant_id)
         return tc.format(TENANT_RESPONSE_SYSTEM)
 
     async def classify_intent(self, query: str, tenant_id: str | None = None) -> dict:
@@ -243,7 +253,7 @@ class GraphRAGEngine:
 
     def _build_context(self, fused: list[dict], intent_data: dict, tenant_id: str | None = None) -> str:
         """Build a structured context string for Claude synthesis."""
-        tc = get_tenant_config(tenant_id)
+        tc = self._get_tc(tenant_id)
         if not fused:
             return f"No matching {tc.item_noun_plural} found in the knowledge base."
 
@@ -328,7 +338,7 @@ Please provide a helpful, empathetic response that:
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"Response synthesis error: {e}")
-            tc = get_tenant_config(tenant_id)
+            tc = self._get_tc(tenant_id)
             return f"Based on your query, here are relevant {tc.item_noun_plural}:\n\n{context}"
 
     async def retrieve_context(

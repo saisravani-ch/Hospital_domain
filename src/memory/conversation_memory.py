@@ -17,7 +17,7 @@ class ConversationMemory:
             self._sessions[session_id] = Conversation(
                 id=session_id,
                 tenant_id=tenant_id,
-                client_id=client_id or "gleneagles_001",
+                client_id=client_id or "",
             )
         return self._sessions[session_id]
 

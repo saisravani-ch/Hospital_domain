@@ -2,12 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import openai
-
-from src.knowledge_base.config import get_tenant_config
-from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
-from src.knowledge_base.query.graphrag_engine import GraphRAGEngine
-from src.memory.conversation_memory import ConversationMemory
 from src.tools import graphrag_tool, workflow_tool
 
 TOOL_DEFS: list[dict] = [
@@ -24,7 +18,7 @@ TOOL_DEFS: list[dict] = [
                     "doctor_name": {"type": "string", "description": "Specific doctor name if mentioned by the user", "nullable": True},
                     "language": {"type": "string", "description": "Preferred language for the doctor (e.g. 'Tamil', 'Hindi', 'English')", "nullable": True},
                     "min_experience": {"type": "integer", "description": "Minimum years of experience requested", "nullable": True},
-                    "tenant_id": {"type": "string", "description": "Hospital tenant filter (e.g. 'glh-chn' for Chennai, 'glh-kengeri' for Bengaluru)", "nullable": True},
+                    "tenant_id": {"type": "string", "description": "Hospital tenant identifier — filters results to a specific hospital branch", "nullable": True},
                 },
                 "required": ["query"],
             },
@@ -55,9 +49,9 @@ TOOL_DEFS: list[dict] = [
                 "properties": {
                     "doctor_id": {"type": "string", "description": "Doctor's ID"},
                     "date": {"type": "string", "description": "Date in YYYY-MM-DD format"},
-                    "client_id": {"type": "string", "description": "Client/hospital identifier", "nullable": True},
+                    "client_id": {"type": "string", "description": "Client/hospital identifier"},
                 },
-                "required": ["doctor_id", "date"],
+                "required": ["doctor_id", "date", "client_id"],
             },
         },
     },
@@ -73,10 +67,10 @@ TOOL_DEFS: list[dict] = [
                     "patient_phone": {"type": "string", "description": "Patient's phone number"},
                     "date": {"type": "string", "description": "Date in YYYY-MM-DD format"},
                     "time": {"type": "string", "description": "Time slot in HH:MM format (e.g. '10:30', '14:00')"},
-                    "client_id": {"type": "string", "description": "Client/hospital identifier", "nullable": True},
+                    "client_id": {"type": "string", "description": "Client/hospital identifier"},
                     "notes": {"type": "string", "description": "Optional notes or reason for visit", "nullable": True},
                 },
-                "required": ["doctor_id", "patient_phone", "date", "time"],
+                "required": ["doctor_id", "patient_phone", "date", "time", "client_id"],
             },
         },
     },
@@ -91,9 +85,9 @@ TOOL_DEFS: list[dict] = [
                     "appointment_id": {"type": "string", "description": "Appointment ID to reschedule"},
                     "new_date": {"type": "string", "description": "New date in YYYY-MM-DD format"},
                     "new_time": {"type": "string", "description": "New time in HH:MM format"},
-                    "client_id": {"type": "string", "description": "Client/hospital identifier", "nullable": True},
+                    "client_id": {"type": "string", "description": "Client/hospital identifier"},
                 },
-                "required": ["appointment_id", "new_date", "new_time"],
+                "required": ["appointment_id", "new_date", "new_time", "client_id"],
             },
         },
     },
@@ -106,42 +100,34 @@ TOOL_DEFS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "appointment_id": {"type": "string", "description": "Appointment ID to cancel"},
-                    "client_id": {"type": "string", "description": "Client/hospital identifier", "nullable": True},
+                    "client_id": {"type": "string", "description": "Client/hospital identifier"},
                 },
-                "required": ["appointment_id"],
+                "required": ["appointment_id", "client_id"],
             },
         },
     },
 ]
 
 
-def build_tool_map(
-    graphrag: GraphRAGEngine | None,
-    graph: Neo4jQueryEngine | None,
-    memory: ConversationMemory,
-) -> dict[str, callable]:
-    """Bind engine dependencies to tool functions and return a name->callable map."""
+def build_tool_map() -> dict[str, callable]:
+    """Return a name->callable map for all tools. Tools call the downstream services via HTTP."""
 
     async def search_doctors(query: str, tenant_id: str | None = None, specialization: str | None = None, doctor_name: str | None = None, language: str | None = None, min_experience: int | None = None) -> dict[str, Any]:
-        if graphrag is None:
-            return {"error": "Knowledge base is not available (Neo4j/chroma not connected)."}
-        return await graphrag_tool.search_doctors(query, graphrag, tenant_id, specialization, doctor_name, language, min_experience)
+        return await graphrag_tool.search_doctors(query, tenant_id=tenant_id, specialization=specialization, doctor_name=doctor_name, language=language, min_experience=min_experience)
 
     async def get_doctor_info(doctor_id: str, tenant_id: str | None = None) -> dict[str, Any]:
-        if graph is None:
-            return {"error": "Knowledge base is not available (Neo4j not connected)."}
-        return await graphrag_tool.get_doctor_info(doctor_id, graph, tenant_id)
+        return await graphrag_tool.get_doctor_info(doctor_id, tenant_id=tenant_id)
 
-    async def check_availability(doctor_id: str, date: str, client_id: str = "gleneagles_001") -> dict[str, Any]:
+    async def check_availability(doctor_id: str, date: str, client_id: str) -> dict[str, Any]:
         return await workflow_tool.check_availability(doctor_id, date, client_id)
 
-    async def book_appointment(doctor_id: str, patient_phone: str, date: str, time: str, client_id: str = "gleneagles_001", notes: str | None = None) -> dict[str, Any]:
+    async def book_appointment(doctor_id: str, patient_phone: str, date: str, time: str, client_id: str, notes: str | None = None) -> dict[str, Any]:
         return await workflow_tool.book_appointment(doctor_id, patient_phone, date, time, client_id, notes)
 
-    async def reschedule_appointment(appointment_id: str, new_date: str, new_time: str, client_id: str = "gleneagles_001") -> dict[str, Any]:
+    async def reschedule_appointment(appointment_id: str, new_date: str, new_time: str, client_id: str) -> dict[str, Any]:
         return await workflow_tool.reschedule_appointment(appointment_id, new_date, new_time, client_id)
 
-    async def cancel_appointment(appointment_id: str, client_id: str = "gleneagles_001") -> dict[str, Any]:
+    async def cancel_appointment(appointment_id: str, client_id: str) -> dict[str, Any]:
         return await workflow_tool.cancel_appointment(appointment_id, client_id)
 
     return {

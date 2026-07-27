@@ -1,39 +1,41 @@
 """Centralised settings loaded from environment / .env file."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.orm import Session
 
 
 # ── Tenant Configuration ────────────────────────────────────────────────────────
 # Each tenant = one hospital branch.
 # Tenant ID matches the hospital ID (e.g. "glh-chn" for Gleneagles Chennai).
 # Define tenants in tenants.json at the project root (see tenants.json for format).
-# The hardcoded dict below serves as a fallback when the file is missing.
+# The hardcoded dict below serves as a build-time registry before the DB is populated.
+# At runtime all display/branding data is loaded from the `hospitals` SQLite table.
 
 
 @dataclass
 class TenantConfig:
     """Identity and branding for a hospital branch tenant."""
 
-    tenant_id: str = "glh-chn"
-    brand_name: str = "Gleneagles HealthCity Chennai"
-    brand_description: str = "a multi-specialty hospital in Chennai"
+    tenant_id: str = ""
+    brand_name: str = ""
+    brand_description: str = ""
     currency_symbol: str = "₹"
     item_noun: str = "doctor"
     item_noun_plural: str = "doctors"
-    contact_phone: str = "044 4624 2424"
-    booking_base_url: str = "https://www.gleneagleshospitals.co.in/book-an-appointment"
-    location_id: int = 80
-    loc_short: str = "chn"
-    city: str = "Chennai"
-    state: str = "Tamil Nadu"
-    hospital_id: str = "glh-chn"
+    contact_phone: str = ""
+    booking_base_url: str = ""
+    location_id: int = 0
+    loc_short: str = ""
+    city: str = ""
+    state: str = ""
+    hospital_id: str = ""
 
     def format(self, template: str) -> str:
-        """Render a template string with tenant variables."""
         return (
             template
             .replace("{brand_name}", self.brand_name)
@@ -47,61 +49,76 @@ class TenantConfig:
         )
 
 
-# ── Tenant topology ─────────────────────────────────────────────────────────────
-# Minimal mapping of location_id → tenant identity.
-# This defines WHICH tenants exist and is needed at build time before the DB is populated.
-# All display/branding data (name, phone, description, etc.) is loaded from SQLite at runtime.
+# ── Tenant topology (build-time registry) ──────────────────────────────────────
+# Minimal tenant_id → location_id mapping used by the data pipeline before
+# the SQLite DB is populated. All display/branding fields come from the DB.
 
-TENANT_META: dict[str, dict] = {
-    "glh-chn":     {"location_id": 80,  "loc_short": "chn",     "city": "Chennai",    "state": "Tamil Nadu",    "hospital_id": "glh-chn"},
-    "glh-adyar":   {"location_id": 81,  "loc_short": "adyar",   "city": "Chennai",    "state": "Tamil Nadu",    "hospital_id": "glh-adyar"},
-    "glh-kengeri": {"location_id": 82,  "loc_short": "kengeri", "city": "Bengaluru",  "state": "Karnataka",     "hospital_id": "glh-kengeri"},
-    "glh-richmond":{"location_id": 83,  "loc_short": "richmond","city": "Bengaluru",  "state": "Karnataka",     "hospital_id": "glh-richmond"},
-    "glh-parel":   {"location_id": 84,  "loc_short": "parel",   "city": "Mumbai",     "state": "Maharashtra",   "hospital_id": "glh-parel"},
-    "glh-lkp":     {"location_id": 85,  "loc_short": "lkp",     "city": "Hyderabad",  "state": "Telangana",     "hospital_id": "glh-lkp"},
-    "glh-lbn":     {"location_id": 86,  "loc_short": "lbn",     "city": "Hyderabad",  "state": "Telangana",     "hospital_id": "glh-lbn"},
+TENANT_META: dict[str, int] = {
+    "glh-chn":     80,
+    "glh-adyar":   81,
+    "glh-kengeri": 82,
+    "glh-richmond": 83,
+    "glh-parel":   84,
+    "glh-lkp":     85,
+    "glh-lbn":     86,
 }
 
-LOCATION_TO_TENANT: dict[int, str] = {
-    meta["location_id"]: tid
-    for tid, meta in TENANT_META.items()
-}
+LOCATION_TO_TENANT: dict[int, str] = {loc: tid for tid, loc in TENANT_META.items()}
 
 TENANTS: tuple[str, ...] = tuple(TENANT_META.keys())
-
-_currency = "₹"
-_item_noun = "doctor"
-_item_noun_plural = "doctors"
-_booking_base_url = "https://www.gleneagleshospitals.co.in/book-an-appointment"
 
 
 def tenant_id_for_location(location_id: int) -> str:
     """Map a location_id to the tenant_id that owns it."""
-    return LOCATION_TO_TENANT.get(location_id, "glh-chn")
+    return LOCATION_TO_TENANT.get(location_id, "")
 
 
 def get_tenant_config(tenant_id: str | None = None) -> TenantConfig:
-    """Resolve a TenantConfig by id from TENANT_META."""
-    tid = tenant_id or get_settings().tenant_id
-    meta = TENANT_META.get(tid)
-    if not meta:
-        meta = TENANT_META.get("glh-chn", {})
-        tid = "glh-chn"
+    """Resolve a TenantConfig without a DB session (uses slim build-time fallback)."""
+    s = get_settings()
+    tid = tenant_id or s.tenant_id
+    loc_id = TENANT_META.get(tid, 0)
 
     return TenantConfig(
         tenant_id=tid,
-        brand_name=tid.replace("-", " ").title().replace("Glh", "Gleneagles"),
-        brand_description=f"a hospital in {meta['city']}",
-        currency_symbol=_currency,
-        item_noun=_item_noun,
-        item_noun_plural=_item_noun_plural,
+        brand_name=tid.replace("-", " ").title().replace("Glh", "Gleneagles") if tid else "",
+        brand_description=f"a hospital (tenant {tid})" if tid else "",
+        currency_symbol=s.currency_symbol,
+        item_noun=s.item_noun,
+        item_noun_plural=s.item_noun_plural,
         contact_phone="",
-        booking_base_url=_booking_base_url,
-        location_id=meta["location_id"],
-        loc_short=meta["loc_short"],
-        city=meta["city"],
-        state=meta["state"],
-        hospital_id=meta["hospital_id"],
+        booking_base_url=s.booking_base_url,
+        location_id=loc_id,
+        loc_short=tid.split("-")[-1] if "-" in tid else "",
+        city="",
+        state="",
+        hospital_id=tid,
+    )
+
+
+def get_tenant_config_from_db(tid: str, session: Session) -> TenantConfig | None:
+    """Load a TenantConfig from the `hospitals` SQLite table."""
+    from src.knowledge_base.db.models import Hospital
+
+    s = get_settings()
+    h = session.query(Hospital).filter(Hospital.id == tid).first()
+    if not h:
+        return None
+
+    return TenantConfig(
+        tenant_id=tid,
+        brand_name=h.name or "",
+        brand_description=h.brand_description or "",
+        currency_symbol=s.currency_symbol,
+        item_noun=s.item_noun,
+        item_noun_plural=s.item_noun_plural,
+        contact_phone=h.phone or "",
+        booking_base_url=h.booking_base_url or s.booking_base_url,
+        location_id=h.location_id or 0,
+        loc_short=h.loc_short or "",
+        city=h.city or "",
+        state=h.state or "",
+        hospital_id=tid,
     )
 
 
@@ -139,6 +156,12 @@ class Settings(BaseSettings):
 
     # SQL — SQLite (structured facts: doctors, hospitals, schedules, slots)
     sqlite_path: str
+
+    # Tenant branding defaults (overridable per tenant via DB / env)
+    currency_symbol: str = "₹"
+    item_noun: str = "doctor"
+    item_noun_plural: str = "doctors"
+    booking_base_url: str = "https://www.gleneagleshospitals.co.in/book-an-appointment"
 
     # Scraper / build (optional — only needed when running data import)
     gleneagles_base_url: str | None = None

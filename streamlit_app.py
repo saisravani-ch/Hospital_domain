@@ -70,7 +70,7 @@ with tab_chat:
                        on_change=lambda: setattr(st.session_state, "session_id", st.session_state.session_input))
     with col2:
         st.text_input("Tenant ID", value="", key="tenant_input",
-                       placeholder="glh-chn, glh-parel, ...")
+                       placeholder="hospital-branch-id (e.g. glh-chn)")
     with col3:
         if st.button("🔄 New Session"):
             st.session_state.session_id = f"test_{uuid.uuid4().hex[:8]}"
@@ -85,28 +85,23 @@ with tab_chat:
     def _send_message(text: str) -> None:
         """Send a message to the agent and append the response to session state."""
         st.session_state.messages.append({"role": "user", "content": text})
-        with st.chat_message("user"):
-            st.markdown(text)
+        with st.spinner("Thinking..."):
+            payload = {
+                "message": text,
+                "session_id": st.session_state.session_id,
+            }
+            if st.session_state.tenant_input:
+                payload["tenant_id"] = st.session_state.tenant_input
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                payload = {
-                    "message": text,
-                    "session_id": st.session_state.session_id,
-                }
-                if st.session_state.tenant_input:
-                    payload["tenant_id"] = st.session_state.tenant_input
-
-                url = f"{AGENT_URL}/chat"
-                result = post(url, payload)
-                if "error" in result:
-                    st.error(f"**Request failed**\n\n`POST {url}`\n\n{result['error']}")
-                    response = f"I'm sorry, I couldn't reach the agent server.\n\n> {result['error']}"
-                else:
-                    response = result.get("response", str(result))
-                    st.markdown(response)
+            url = f"{AGENT_URL}/chat"
+            result = post(url, payload)
+            if "error" in result:
+                response = f"I'm sorry, I couldn't reach the agent server.\n\n> {result['error']}"
+            else:
+                response = result.get("response", str(result))
 
         st.session_state.messages.append({"role": "assistant", "content": response})
+        st.rerun()
 
     # Chat input
     if prompt := st.chat_input("Ask about doctors, book appointments..."):
@@ -122,13 +117,12 @@ with tab_chat:
         "Find a Tamil-speaking doctor",
         "Orthopaedic surgeon with 10+ years experience",
         "Show me available slots for today",
-        "What doctors are available in Chennai?",
+        "What doctors are available in this hospital?",
     ]
     for i, q in enumerate(quick_queries):
         with qa_cols[i % 2]:
             if st.button(q, key=f"qq_{i}", use_container_width=True):
                 _send_message(q)
-                st.rerun()
 
 # ── Tab 2: Doctors ───────────────────────────────────────────────────────────────
 
@@ -148,7 +142,7 @@ with tab_doctors:
                               else "e.g. dr-j-ajith-kumar-chn")
     with col2:
         n_results = st.number_input("Max results", min_value=1, max_value=20, value=6)
-        tenant_search = st.text_input("Tenant ID (optional)", placeholder="glh-chn")
+        tenant_search = st.text_input("Tenant ID (optional)", placeholder="e.g. glh-chn")
 
     if st.button("🔍 Search", type="primary", use_container_width=True) and query:
         with st.spinner("Searching..."):
@@ -227,7 +221,7 @@ with tab_appointments:
         with col2:
             date_str = st.date_input("Date", key="avail_date")
         with col3:
-            client_id = st.text_input("Client ID", value="gleneagles_001", key="avail_client")
+            client_id = st.text_input("Client ID", key="avail_client", placeholder="e.g. acme_001")
 
         if st.button("🔍 Check Availability", type="primary", key="btn_avail") and doc_id:
             with st.spinner("Checking..."):
@@ -247,11 +241,11 @@ with tab_appointments:
         col1, col2 = st.columns(2)
         with col1:
             b_doc = st.text_input("Doctor ID", key="book_doc", placeholder="dr-...")
-            b_phone = st.text_input("Patient Phone", key="book_phone", placeholder="+919999999999")
+            b_phone = st.text_input("Patient Phone", key="book_phone", placeholder="e.g. +919999999999")
             b_date = st.date_input("Date", key="book_date")
         with col2:
             b_time = st.text_input("Time", key="book_time", placeholder="10:30")
-            b_client = st.text_input("Client ID", value="gleneagles_001", key="book_client")
+            b_client = st.text_input("Client ID", key="book_client", placeholder="e.g. acme_001")
             b_notes = st.text_input("Notes (optional)", key="book_notes", placeholder="Reason for visit")
 
         if st.button("📅 Book Appointment", type="primary", key="btn_book") and b_doc and b_phone and b_date and b_time:
@@ -280,7 +274,7 @@ with tab_appointments:
             r_date = st.date_input("New Date", key="resched_date")
         with col2:
             r_time = st.text_input("New Time", key="resched_time", placeholder="14:00")
-            r_client = st.text_input("Client ID", value="gleneagles_001", key="resched_client")
+            r_client = st.text_input("Client ID", key="resched_client", placeholder="e.g. acme_001")
 
         if st.button("🔄 Reschedule", type="primary", key="btn_resched") and r_id and r_date and r_time:
             with st.spinner("Rescheduling..."):
@@ -304,7 +298,7 @@ with tab_appointments:
         with col1:
             c_id = st.text_input("Appointment ID", key="cancel_id", placeholder="apt_...")
         with col2:
-            c_client = st.text_input("Client ID", value="gleneagles_001", key="cancel_client")
+            c_client = st.text_input("Client ID", key="cancel_client", placeholder="e.g. acme_001")
 
         if st.button("❌ Cancel Appointment", type="primary", key="btn_cancel") and c_id:
             with st.spinner("Cancelling..."):

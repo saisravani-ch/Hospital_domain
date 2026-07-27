@@ -1,26 +1,32 @@
 from __future__ import annotations
 
-import asyncio
+import os
 from typing import Any
 
-from src.workflows.services.booking_service import AppointmentBookingService
+import httpx
 
-
-def _get_service(client_id: str) -> AppointmentBookingService:
-    return AppointmentBookingService(client_id)
+WF_BASE = os.getenv("WF_URL", "http://localhost:8001")
 
 
 async def check_availability(
     doctor_id: str,
     date: str,
-    client_id: str = "gleneagles_001",
+    client_id: str,
 ) -> dict[str, Any]:
-    """Check available appointment slots for a doctor on a given date."""
-    service = _get_service(client_id)
+    """Check available appointment slots via workflows HTTP API."""
     try:
-        slots = await asyncio.to_thread(service.get_availability, doctor_id, date)
-        return {"doctor_id": doctor_id, "date": date, "slots_available": len(slots), "slots": slots}
-    except ValueError as e:
+        params = {"client_id": client_id, "doctor_id": doctor_id, "date": date}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{WF_BASE}/appointments/availability", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            return {
+                "doctor_id": doctor_id,
+                "date": date,
+                "slots_available": len(data.get("slots", [])),
+                "slots": data.get("slots", []),
+            }
+    except httpx.HTTPError as e:
         return {"error": str(e)}
 
 
@@ -29,15 +35,25 @@ async def book_appointment(
     patient_phone: str,
     date: str,
     time: str,
-    client_id: str = "gleneagles_001",
+    client_id: str,
     notes: str | None = None,
 ) -> dict[str, Any]:
-    """Book an appointment with a doctor at a specific date and time."""
-    service = _get_service(client_id)
+    """Book an appointment via workflows HTTP API."""
     try:
-        result = await asyncio.to_thread(service.book, patient_phone, doctor_id, date, time, notes)
-        return result
-    except ValueError as e:
+        body = {
+            "client_id": client_id,
+            "patient_phone": patient_phone,
+            "doctor_id": doctor_id,
+            "date": date,
+            "time": time,
+        }
+        if notes:
+            body["notes"] = notes
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(f"{WF_BASE}/appointments/book", json=body)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPError as e:
         return {"error": str(e)}
 
 
@@ -45,25 +61,37 @@ async def reschedule_appointment(
     appointment_id: str,
     new_date: str,
     new_time: str,
-    client_id: str = "gleneagles_001",
+    client_id: str,
 ) -> dict[str, Any]:
-    """Reschedule an existing appointment to a new date and time."""
-    service = _get_service(client_id)
+    """Reschedule an appointment via workflows HTTP API."""
     try:
-        result = await asyncio.to_thread(service.reschedule, appointment_id, new_date, new_time)
-        return result
-    except ValueError as e:
+        body = {
+            "client_id": client_id,
+            "appointment_id": appointment_id,
+            "new_date": new_date,
+            "new_time": new_time,
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(f"{WF_BASE}/appointments/reschedule", json=body)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPError as e:
         return {"error": str(e)}
 
 
 async def cancel_appointment(
     appointment_id: str,
-    client_id: str = "gleneagles_001",
+    client_id: str,
 ) -> dict[str, Any]:
-    """Cancel an existing appointment."""
-    service = _get_service(client_id)
+    """Cancel an appointment via workflows HTTP API."""
     try:
-        result = await asyncio.to_thread(service.cancel, appointment_id)
-        return result
-    except ValueError as e:
+        body = {
+            "client_id": client_id,
+            "appointment_id": appointment_id,
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(f"{WF_BASE}/appointments/cancel", json=body)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPError as e:
         return {"error": str(e)}

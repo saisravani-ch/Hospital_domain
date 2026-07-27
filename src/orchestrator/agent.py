@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import openai
@@ -8,13 +7,15 @@ from loguru import logger
 
 from src.knowledge_base.config import get_settings, get_tenant_config
 from src.orchestrator.prompts import SYSTEM_PROMPT_TEMPLATE
-from src.orchestrator.tools import TOOL_DEFS
 
 settings = get_settings()
+from src.orchestrator.router import classify, DISCOVERY, BOOKING, QA
+from src.orchestrator.discovery import execute_discovery
+from src.orchestrator.booking import execute_booking
 
 
 class Agent:
-    """ReAct-style agent that routes user queries to RAG/workflow tools."""
+    """Plan-then-Execute agent that routes user queries to the right handler."""
 
     def __init__(
         self,
@@ -24,83 +25,56 @@ class Agent:
         self._llm = llm_client
         self._tool_map = tool_map
 
-    def _build_system_prompt(self, tenant_id: str | None = None) -> str:
-        tc = get_tenant_config(tenant_id)
-        return tc.format(SYSTEM_PROMPT_TEMPLATE)
-
     async def run(
         self,
         messages: list[dict],
         tenant_id: str | None = None,
+        client_id: str | None = None,
+        session_id: str = "",
         max_turns: int = 6,
     ) -> list[dict]:
-        """Process messages through the agent loop. Returns updated message list."""
         if self._llm is None:
             return [
                 *messages,
                 {"role": "assistant", "content": "Agent is not available (LLM not configured). Please set up Azure OpenAI credentials in .env and restart."},
             ]
 
-        system_prompt = self._build_system_prompt(tenant_id)
-        conversation = [{"role": "system", "content": system_prompt}, *messages]
-        turn = 0
+        last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        if not last_user_msg:
+            return [*messages, {"role": "assistant", "content": "How can I help you today?"}]
 
-        while turn < max_turns:
-            turn += 1
-            try:
-                response = await self._llm.chat.completions.create(
-                    model=settings.azure_openai_deployment_name,
-                    messages=conversation,
-                    tools=TOOL_DEFS,
-                    tool_choice="auto",
-                    max_tokens=1024,
-                    temperature=0.3,
-                )
-            except Exception as e:
-                logger.error(f"LLM call failed: {e}")
-                conversation.append({
-                    "role": "assistant",
-                    "content": "I'm sorry, I encountered an error processing your request. Please try again.",
-                })
-                break
+        domain = classify(last_user_msg)
+        logger.info(f"Domain: {domain} | message: {last_user_msg[:80]}")
 
-            choice = response.choices[0]
-            msg = choice.message
-
-            if not msg.tool_calls:
-                conversation.append({"role": "assistant", "content": msg.content or ""})
-                break
-
-            conversation.append(msg.model_dump(exclude={"function_call", "audio"}))
-
-            for tool_call in msg.tool_calls:
-                fn_name = tool_call.function.name
-                fn_args = self._parse_args(fn_name, tool_call.function.arguments)
-                logger.info(f"Tool call: {fn_name}({fn_args})")
-
-                tool_fn = self._tool_map.get(fn_name)
-                if not tool_fn:
-                    result = {"error": f"Unknown tool: {fn_name}"}
-                else:
-                    try:
-                        result = await tool_fn(**fn_args)
-                    except Exception as e:
-                        logger.error(f"Tool {fn_name} error: {e}")
-                        result = {"error": str(e)}
-
-                conversation.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(result, default=str),
-                })
-
-        return conversation[1:]  # strip system prompt
-
-    def _parse_args(self, fn_name: str, raw: str) -> dict:
         try:
-            args = json.loads(raw)
-            # Strip null-valued keys so tools use defaults
-            return {k: v for k, v in args.items() if v is not None}
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse args for {fn_name}: {raw}")
-            return {}
+            if domain == DISCOVERY:
+                response = await execute_discovery(self._llm, self._tool_map, last_user_msg, tenant_id)
+            elif domain == BOOKING:
+                response = await execute_booking(
+                    self._llm, self._tool_map, last_user_msg, session_id, tenant_id, client_id)
+            else:  # QA
+                response = await self._qa_response(last_user_msg, tenant_id)
+        except Exception as e:
+            logger.error(f"Handler error: {e}")
+            response = "I'm sorry, I encountered an error. Please try again."
+
+        return [*messages, {"role": "assistant", "content": response}]
+
+    async def _qa_response(self, message: str, tenant_id: str | None = None) -> str:
+        """Handle general questions, greetings, chit-chat."""
+        tc = get_tenant_config(tenant_id)
+        system = tc.format(SYSTEM_PROMPT_TEMPLATE)
+        try:
+            resp = await self._llm.chat.completions.create(
+                model=settings.azure_openai_deployment_name,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": message},
+                ],
+                max_tokens=300,
+                temperature=0.7,
+            )
+            return resp.choices[0].message.content or ""
+        except Exception as e:
+            logger.error(f"QA error: {e}")
+            return f"Hello! I'm the {tc.brand_name} assistant. I can help you find doctors and book appointments. How can I help?"

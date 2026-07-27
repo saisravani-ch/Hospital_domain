@@ -62,13 +62,12 @@ class Neo4jLoader:
     # ── Hospital ───────────────────────────────────────────────────────────────
 
     def _tenant_from_hospitals(self, hospital_ids: list[str]) -> str:
-        """Derive tenant_id from hospital IDs — matches the hospital_id field in TENANT_META."""
-        from src.config import TENANT_META
+        """Derive tenant_id from hospital IDs — matches TENANT_META keys."""
+        from src.knowledge_base.config import TENANT_META
         for hid in (hospital_ids or []):
-            for tid, meta in TENANT_META.items():
-                if meta["hospital_id"] == hid:
-                    return tid
-        return "glh-chn"
+            if hid in TENANT_META:
+                return hid
+        return next(iter(TENANT_META), "glh-chn")
 
     async def upsert_hospital(self, h: dict) -> None:
         async with self._session() as session:

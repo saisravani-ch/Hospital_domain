@@ -13,6 +13,7 @@ from src.knowledge_base.config import get_settings
 from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
 from src.knowledge_base.query.graphrag_engine import GraphRAGEngine
 from src.knowledge_base.rag.vector_store import VectorStore
+from src.knowledge_base.db.database import get_session
 
 settings = get_settings()
 
@@ -44,5 +45,6 @@ async def get_graphrag_engine() -> GraphRAGEngine:
     if _graphrag_engine is None:
         vs = await get_vector_store()
         ge = await get_graph_engine()
-        _graphrag_engine = GraphRAGEngine(vector_store=vs, graph_engine=ge)
+        session = get_session()
+        _graphrag_engine = GraphRAGEngine(vector_store=vs, graph_engine=ge, db_session=session)
     return _graphrag_engine

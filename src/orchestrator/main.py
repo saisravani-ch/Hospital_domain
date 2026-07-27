@@ -15,8 +15,6 @@ from pydantic import BaseModel
 
 from src.orchestrator.agent import Agent
 from src.orchestrator.dependencies import (
-    get_graphrag_engine,
-    get_graph_engine,
     get_llm_client,
     get_memory,
 )
@@ -30,12 +28,10 @@ async def lifespan(app: FastAPI):
     global _agent
     logger.info("Starting Hospital Conversation Agent API...")
     llm = get_llm_client()
-    graphrag = await get_graphrag_engine()
-    graph = await get_graph_engine()
     memory = get_memory()
     if llm is None:
         logger.warning("LLM client unavailable — agent will return fallback responses")
-    tool_map = build_tool_map(graphrag, graph, memory)
+    tool_map = build_tool_map()
     _agent = Agent(llm, tool_map)
     yield
     logger.info("Shutting down Conversation Agent API.")
@@ -86,7 +82,7 @@ async def chat(req: ChatRequest) -> dict[str, Any]:
     history.append({"role": "user", "content": req.message})
 
     # Run agent
-    updated = await _agent.run(history, tenant_id=req.tenant_id)
+    updated = await _agent.run(history, tenant_id=req.tenant_id, client_id=req.client_id, session_id=session_id)
 
     # Save only user + assistant messages (tool calls are ephemeral per turn)
     memory.clear(session_id)

@@ -1,56 +1,61 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
-from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
-from src.knowledge_base.query.graphrag_engine import GraphRAGEngine
+import httpx
+
+KB_BASE = os.getenv("KB_URL", "http://localhost:8000")
 
 
 async def search_doctors(
     query: str,
-    graphrag: GraphRAGEngine | None,
+    graphrag: Any = None,
     tenant_id: str | None = None,
     specialization: str | None = None,
     doctor_name: str | None = None,
     language: str | None = None,
     min_experience: int | None = None,
 ) -> dict[str, Any]:
-    """Search for doctors using structured params extracted by the LLM."""
-    if graphrag is None:
-        return {"error": "Knowledge base unavailable", "context": "", "doctors": [], "booking_links": []}
-    fused, context_text, booking_links = await graphrag.retrieve_context(
-        query, tenant_id,
-        specialization=specialization,
-        doctor_name=doctor_name,
-        language=language,
-        min_experience=min_experience,
-    )
-    return {
-        "context": context_text,
-        "doctors": [
-            {
-                "doctor_id": d.get("doctor_id") or d.get("id", ""),
-                "name": d.get("name") or d.get("doctor_name", ""),
-                "specializations": d.get("specializations", ""),
-                "experience_years": d.get("experience_years"),
-                "consultation_fee": d.get("consultation_fee"),
-                "languages": d.get("languages", ""),
-                "hospital": d.get("hospitals") or d.get("hospital_ids", ""),
-                "designation": d.get("designation", ""),
+    """Search for doctors via knowledge_base retrieval API (no LLM on KB side)."""
+    body = {"query": query}
+    if tenant_id:
+        body["tenant_id"] = tenant_id
+    if specialization:
+        body["specialization"] = specialization
+    if doctor_name:
+        body["doctor_name"] = doctor_name
+    if language:
+        body["language"] = language
+    if min_experience is not None:
+        body["min_experience"] = min_experience
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(f"{KB_BASE}/search/retrieve", json=body)
+            resp.raise_for_status()
+            data = resp.json()
+            return {
+                "context": "",
+                "doctors": data.get("doctors", []),
+                "booking_links": data.get("booking_links", []),
             }
-            for d in fused
-        ],
-        "booking_links": booking_links,
-    }
+    except httpx.HTTPError as e:
+        return {"error": f"Knowledge base unavailable: {e}", "context": "", "doctors": [], "booking_links": []}
 
 
 async def get_doctor_info(
     doctor_id: str,
-    graph: Neo4jQueryEngine,
+    graph: Any = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
-    """Get detailed information about a specific doctor by ID."""
-    doc = await graph.get_doctor_context(doctor_id)
-    if not doc:
-        return {"error": f"Doctor '{doctor_id}' not found"}
-    return dict(doc)
+    """Get detailed doctor info via knowledge_base HTTP API."""
+    try:
+        params = {}
+        if tenant_id:
+            params["tenant_id"] = tenant_id
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{KB_BASE}/doctors/{doctor_id}", params=params)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPError as e:
+        return {"error": f"Doctor info unavailable: {e}"}

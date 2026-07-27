@@ -82,8 +82,14 @@ async def quick_book(
 
 def _build_next_steps(intent: QueryIntent, booking_links: list[dict], tenant_id: str | None = None) -> list[str]:
     """Generate actionable next steps based on intent."""
-    from src.config import get_tenant_config
-    tc = get_tenant_config(tenant_id)
+    from src.knowledge_base.db.database import get_session
+    from src.knowledge_base.config import get_tenant_config, get_tenant_config_from_db
+
+    session = get_session()
+    tc = get_tenant_config_from_db(tenant_id, session) if tenant_id else None
+    if not tc:
+        tc = get_tenant_config(tenant_id)
+    session.close()
 
     if intent == QueryIntent.BOOK_APPOINTMENT and booking_links:
         link = booking_links[0]

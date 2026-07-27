@@ -18,7 +18,7 @@ class Message(BaseModel):
 class Conversation(BaseModel):
     id: str
     tenant_id: str | None = None
-    client_id: str = "gleneagles_001"
+    client_id: str = ""
     messages: list[Message] = []
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -28,4 +28,4 @@ class AgentState(BaseModel):
     messages: list[dict]  # raw OpenAI-format messages
     session_id: str
     tenant_id: str | None = None
-    client_id: str = "gleneagles_001"
+    client_id: str = ""

@@ -25,7 +25,7 @@ from typing import Optional
 
 from loguru import logger
 
-from src.config import get_tenant_config, tenant_id_for_location, TenantConfig
+from src.knowledge_base.config import get_settings, get_tenant_config, tenant_id_for_location, TenantConfig
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ def build_hospitals(api_doctors: list[dict], tenant_config: TenantConfig | None 
     Each record is tagged with its branch tenant_id via tenant_id_for_location().
     If tenant_config is provided, only hospitals for that tenant's location_id are built.
     """
-    from src.config import TENANT_META, _booking_base_url
+    s = get_settings()
 
     seen: dict[int, dict] = {}
     for doc in api_doctors:
@@ -79,12 +79,12 @@ def build_hospitals(api_doctors: list[dict], tenant_config: TenantConfig | None 
             continue
 
         tid = tenant_id_for_location(lid)
-        meta = TENANT_META.get(tid, TENANT_META.get("glh-chn", {}))
-        loc_short = meta["loc_short"]
-        city, state = meta["city"], meta["state"]
+        loc_short = tid.split("-")[-1] if "-" in tid else ""
+        city = doc.get("city") or ""
+        state = doc.get("state") or ""
 
         seen[lid] = {
-            "id": meta["hospital_id"],
+            "id": tid,
             "name": doc.get("location_description") or tid.replace("-", " ").title().replace("Glh", "Gleneagles"),
             "branch": doc.get("location_name") or loc_short.upper(),
             "brand_description": doc.get("speciality_description") or f"a multi-specialty hospital in {city}",
@@ -94,7 +94,7 @@ def build_hospitals(api_doctors: list[dict], tenant_config: TenantConfig | None 
             "loc_short": loc_short,
             "phone": doc.get("customer_care_number_portal"),
             "emergency_phone": doc.get("customer_care_number_portal"),
-            "booking_base_url": _booking_base_url,
+            "booking_base_url": s.booking_base_url,
             "tenant_id": tid,
         }
     return sorted(seen.values(), key=lambda h: h["location_id"])
@@ -126,7 +126,7 @@ def build_doctors(
     if tenant_config:
         tenant_ids_to_process = [tenant_config.tenant_id]
     else:
-        from src.config import TENANTS
+        from src.knowledge_base.config import TENANTS
         tenant_ids_to_process = list(TENANTS)
 
     # Pre-resolve tenant configs for each location_id

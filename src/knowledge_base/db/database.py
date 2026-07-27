@@ -14,8 +14,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker, Session
 
-from src.config import get_settings
-from src.db.models import Base
+from src.knowledge_base.config import get_settings
+from .models import Base
 
 settings = get_settings()
 

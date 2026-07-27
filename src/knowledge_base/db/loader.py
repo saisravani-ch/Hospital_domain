@@ -15,7 +15,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from src.db.models import Doctor, Hospital, ScheduleDay, TimeSlot
+from src.knowledge_base.db.models import Doctor, Hospital, ScheduleDay, TimeSlot
 
 
 def _csv(items: list) -> str | None:
