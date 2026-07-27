@@ -6,9 +6,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.api.dependencies import get_graph_engine, get_vector_store
-from src.graph.neo4j_loader import Neo4jQueryEngine
-from src.rag.vector_store import VectorStore
+# pyrefly: ignore [missing-import]
+from src.knowledge_base.api.dependencies import get_graph_engine, get_vector_store
+from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
+from src.knowledge_base.rag.vector_store import VectorStore
 
 router = APIRouter(prefix="/doctors", tags=["doctors"])
 

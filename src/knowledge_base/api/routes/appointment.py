@@ -7,8 +7,9 @@ from __future__ import annotations
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends
 
-from src.api.dependencies import get_graphrag_engine
-from src.query.graphrag_engine import GraphRAGEngine, QueryIntent
+# pyrefly: ignore [missing-import]
+from src.knowledge_base.api.dependencies import get_graphrag_engine
+from src.knowledge_base.query.graphrag_engine import GraphRAGEngine, QueryIntent
 
 router = APIRouter(prefix="/appointment", tags=["appointment"])
 

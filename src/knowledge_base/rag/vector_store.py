@@ -19,7 +19,7 @@ import chromadb
 from loguru import logger
 from sentence_transformers import SentenceTransformer
 
-from src.config import get_settings
+from src.knowledge_base.config import get_settings
 
 settings = get_settings()
 

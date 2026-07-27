@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from services.booking_service import AppointmentBookingService
-from api.schemas import (
+from src.workflows.services.booking_service import AppointmentBookingService
+from src.workflows.api.schemas import (
     GetAvailabilityRequest, GetAvailabilityResponse,
     BookAppointmentRequest, BookAppointmentResponse,
     RescheduleAppointmentRequest, RescheduleAppointmentResponse,

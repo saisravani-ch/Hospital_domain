@@ -32,9 +32,9 @@ from typing import Any
 import openai
 from loguru import logger
 
-from src.config import get_settings, get_tenant_config
-from src.graph.neo4j_loader import Neo4jQueryEngine
-from src.rag.vector_store import VectorStore
+from src.knowledge_base.config import get_settings, get_tenant_config
+from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
+from src.knowledge_base.rag.vector_store import VectorStore
 
 settings = get_settings()
 
@@ -330,6 +330,86 @@ Please provide a helpful, empathetic response that:
             logger.error(f"Response synthesis error: {e}")
             tc = get_tenant_config(tenant_id)
             return f"Based on your query, here are relevant {tc.item_noun_plural}:\n\n{context}"
+
+    async def retrieve_context(
+        self,
+        query: str,
+        tenant_id: str | None = None,
+        specialization: str | None = None,
+        doctor_name: str | None = None,
+        language: str | None = None,
+        min_experience: int | None = None,
+    ) -> tuple[list[dict], str, list[dict]]:
+        """
+        Multi-target retrieval using structured params extracted by the agent.
+        Vector search always runs; graph search adapts to available params.
+        No LLM calls - suitable for agent tool usage.
+        Returns (fused_doctors, context_text, booking_links).
+        """
+        tid = self._derive_tenant(tenant_id)
+        vector_filter = {"tenant_id": {"$eq": tid}} if tid else None
+
+        # Enrich search query with specialization for better vector matches
+        search_query = query
+        if specialization and specialization.lower() not in query.lower():
+            search_query = f"{query} {specialization}"
+
+        tasks = []
+        # Always run vector search
+        vector_task = asyncio.create_task(
+            asyncio.to_thread(self._vector.semantic_search, search_query, 8, vector_filter)
+        )
+        tasks.append(vector_task)
+
+        # Run targeted graph searches when structured params are available
+        if self._graph is not None:
+            if doctor_name:
+                tasks.append(asyncio.create_task(
+                    self._graph.find_by_fulltext(doctor_name, 5, tid)
+                ))
+            if specialization:
+                tasks.append(asyncio.create_task(
+                    self._graph.find_doctors_by_specialization(specialization, 8, tid)
+                ))
+            if language:
+                tasks.append(asyncio.create_task(
+                    self._graph.find_doctors_by_language(language, 8, tid)
+                ))
+            # Fallback: fulltext on query when no structured params
+            if not any([doctor_name, specialization, language]):
+                tasks.append(asyncio.create_task(
+                    self._graph.find_by_fulltext(query, 5, tid)
+                ))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        vector_results = results[0] if not isinstance(results[0], Exception) else []
+
+        graph_results = []
+        for r in results[1:]:
+            if isinstance(r, Exception):
+                continue
+            if isinstance(r, list):
+                graph_results.extend(r)
+
+        # Filter by min_experience if specified
+        if min_experience and graph_results:
+            graph_results = [d for d in graph_results if (d.get("experience_years") or 0) >= min_experience]
+
+        fused = self._fuse_results(vector_results, graph_results)
+        context_text = self._build_context(fused, {}, tenant_id)
+
+        booking_links = [
+            {
+                "doctor_id": d.get("doctor_id", d.get("id", "")),
+                "name": d.get("name") or d.get("doctor_name", ""),
+                "booking_url": d.get("booking_url") or d.get("profile_url", ""),
+                "fee": d.get("consultation_fee"),
+            }
+            for d in fused
+            if d.get("booking_url") or d.get("profile_url")
+        ]
+
+        return fused, context_text, booking_links
 
     async def query(self, user_query: str, tenant_id: str | None = None) -> QueryResult:
         """Full GraphRAG pipeline: classify → retrieve → fuse → synthesize."""

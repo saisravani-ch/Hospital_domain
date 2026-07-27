@@ -10,8 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from src.api.routes import search_router, doctors_router, appointment_router
-from src.config import get_settings
+from src.knowledge_base.api.routes import search_router, doctors_router, appointment_router
+from src.knowledge_base.config import get_settings
 
 settings = get_settings()
 

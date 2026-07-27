@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import uuid
-from config import get_database_url, get_client_config
+from src.workflows.config import get_database_url, get_client_config
 
 
 class AppointmentBookingService:

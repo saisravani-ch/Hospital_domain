@@ -9,10 +9,10 @@ from functools import lru_cache
 
 from neo4j import AsyncGraphDatabase
 
-from src.config import get_settings
-from src.graph.neo4j_loader import Neo4jQueryEngine
-from src.query.graphrag_engine import GraphRAGEngine
-from src.rag.vector_store import VectorStore
+from src.knowledge_base.config import get_settings
+from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
+from src.knowledge_base.query.graphrag_engine import GraphRAGEngine
+from src.knowledge_base.rag.vector_store import VectorStore
 
 settings = get_settings()
 

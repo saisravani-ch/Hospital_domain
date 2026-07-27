@@ -7,10 +7,10 @@ from __future__ import annotations
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
-from src.api.dependencies import get_graphrag_engine, get_vector_store, get_graph_engine
-from src.query.graphrag_engine import GraphRAGEngine
-from src.rag.vector_store import VectorStore
-from src.graph.neo4j_loader import Neo4jQueryEngine
+from src.knowledge_base.api.dependencies import get_graphrag_engine, get_vector_store, get_graph_engine
+from src.knowledge_base.query.graphrag_engine import GraphRAGEngine
+from src.knowledge_base.rag.vector_store import VectorStore
+from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
 
 router = APIRouter(prefix="/search", tags=["search"])
 

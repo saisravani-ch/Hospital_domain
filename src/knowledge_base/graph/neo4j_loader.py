@@ -15,7 +15,7 @@ from __future__ import annotations
 from loguru import logger
 from neo4j import AsyncGraphDatabase, AsyncDriver
 
-from src.config import get_settings
+from src.knowledge_base.config import get_settings
 
 settings = get_settings()
 
