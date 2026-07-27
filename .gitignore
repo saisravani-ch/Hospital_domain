@@ -1,0 +1,184 @@
+# ============================================================
+# Hospital System — .gitignore
+# Python · FastAPI · ChromaDB · SQLite · Neo4j · MongoDB
+# ============================================================
+
+
+# ── Environment & Secrets ───────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyc
+*.pyd
+
+# Distribution / packaging
+.Python
+build/
+dist/
+eggs/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+MANIFEST
+pip-wheel-metadata/
+share/python-wheels/
+
+# Unit test / coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+pytest_cache/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pyright/
+.ruff_cache/
+
+# Profiling
+*.prof
+
+
+# ── Virtual Environments ─────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.virtualenv/
+
+
+# ── Databases & Persistent Stores ───────────────────────────
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+# SQL dump files
+*.sql
+
+# ChromaDB local vector store
+data/chroma/
+**/chroma/
+chroma_db/
+
+# Neo4j local (if ever run locally)
+neo4j_data/
+neo4j/
+
+# MongoDB local dumps
+mongodump/
+*.bson
+
+
+# ── Machine Learning / Embeddings ───────────────────────────
+# Sentence-Transformers model cache
+models/
+.cache/huggingface/
+.cache/torch/
+sentence_transformers/
+*.bin
+*.safetensors
+*.pt
+*.ckpt
+*.pkl
+
+
+# ── Logs ────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+log/
+
+
+# ── OS & System Files ───────────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+
+
+# ── IDEs & Editors ──────────────────────────────────────────
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# PyCharm / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Vim / Neovim
+*.swp
+*.swo
+Session.vim
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+
+# ── Temporary & Build Artifacts ─────────────────────────────
+tmp/
+temp/
+.tmp/
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Node (if any tooling uses it)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+
+# ── Docker ──────────────────────────────────────────────────
+.dockerignore
+docker-compose.override.yml
