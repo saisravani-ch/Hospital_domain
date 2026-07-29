@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from src.workflows.services.booking_service import AppointmentBookingService
 from src.workflows.api.schemas import (
     GetAvailabilityRequest, GetAvailabilityResponse,
@@ -26,18 +26,22 @@ def get_booking_service(client_id: str) -> AppointmentBookingService:
 
 
 @router.get("/availability", response_model=GetAvailabilityResponse)
-def get_availability(req: GetAvailabilityRequest) -> GetAvailabilityResponse:
+def get_availability(
+    client_id: str = Query(...),
+    doctor_id: str = Query(...),
+    date: str = Query(...),
+) -> GetAvailabilityResponse:
     try:
-        service = get_booking_service(req.client_id)
-        slots = service.get_availability(req.doctor_id, req.date)
+        service = get_booking_service(client_id)
+        slots = service.get_availability(doctor_id, date)
         return GetAvailabilityResponse(
-            doctor_id=req.doctor_id,
-            date=req.date,
+            doctor_id=doctor_id,
+            date=date,
             slots=[AvailableSlot(**slot) for slot in slots],
-            client_id=req.client_id
+            client_id=client_id
         )
     except Exception as e:
-        handle_service_error(e, req.client_id)
+        handle_service_error(e, client_id)
 
 
 @router.post("/book", response_model=BookAppointmentResponse)

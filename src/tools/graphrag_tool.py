@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 import httpx
 
@@ -10,14 +9,12 @@ KB_BASE = os.getenv("KB_URL", "http://localhost:8000")
 
 async def search_doctors(
     query: str,
-    graphrag: Any = None,
     tenant_id: str | None = None,
     specialization: str | None = None,
     doctor_name: str | None = None,
     language: str | None = None,
     min_experience: int | None = None,
 ) -> dict[str, Any]:
-    """Search for doctors via knowledge_base retrieval API (no LLM on KB side)."""
     body = {"query": query}
     if tenant_id:
         body["tenant_id"] = tenant_id
@@ -45,7 +42,6 @@ async def search_doctors(
 
 async def get_doctor_info(
     doctor_id: str,
-    graph: Any = None,
     tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Get detailed doctor info via knowledge_base HTTP API."""

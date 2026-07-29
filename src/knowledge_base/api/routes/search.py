@@ -7,8 +7,10 @@ from __future__ import annotations
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from src.knowledge_base.api.dependencies import get_graphrag_engine, get_vector_store, get_graph_engine
+from src.knowledge_base.db.database import get_session
 from src.knowledge_base.query.graphrag_engine import GraphRAGEngine
 from src.knowledge_base.rag.vector_store import VectorStore
 from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
@@ -41,10 +43,30 @@ async def retrieve_doctors(
         language=req.language,
         min_experience=req.min_experience,
     )
+
+    # Supplement consultation_fee from SQLite (transactional data, not in Neo4j)
+    ids_missing = [d.get("sql_id") or d.get("id") or d.get("doctor_id") for d in fused if not d.get("consultation_fee")]
+    if ids_missing:
+        session = get_session()
+        try:
+            placeholders = ",".join(f":id_{i}" for i in range(len(ids_missing)))
+            params = {f"id_{i}": did for i, did in enumerate(ids_missing)}
+            rows = session.execute(
+                text(f"SELECT id, consultation_fee FROM doctors WHERE id IN ({placeholders})"),
+                params,
+            ).fetchall()
+            fee_map = {row[0]: row[1] for row in rows if row[1] is not None}
+            for d in fused:
+                did = d.get("sql_id") or d.get("id") or d.get("doctor_id")
+                if did in fee_map:
+                    d["consultation_fee"] = fee_map[did]
+        finally:
+            session.close()
+
     return {
         "doctors": [
             {
-                "doctor_id": d.get("doctor_id") or d.get("id", ""),
+                "doctor_id": d.get("doctor_id") or d.get("id") or d.get("sql_id", ""),
                 "name": d.get("name") or d.get("doctor_name", ""),
                 "specializations": d.get("specializations", ""),
                 "experience_years": d.get("experience_years"),
@@ -52,10 +74,14 @@ async def retrieve_doctors(
                 "languages": d.get("languages", ""),
                 "hospital": d.get("hospitals") or d.get("hospital_ids", ""),
                 "designation": d.get("designation", ""),
+                "hospitals": d.get("hospitals") or [],
+                "cities": d.get("cities") or [],
+                "tenant_id": d.get("tenant_id") or "",
             }
             for d in fused
         ],
         "booking_links": booking_links,
+        "total_doctors": len(fused),
     }
 
 

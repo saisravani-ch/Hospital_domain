@@ -1,49 +1,39 @@
 """
-FastAPI application entry point for the Hospital Conversation Agent.
-Routes user queries to RAG (knowledge discovery) or workflow (booking) tools.
+FastAPI entry point for the Hospital Conversation Agent.
+LangGraph stateful agent that searches doctors and manages bookings via downstream services.
 """
 
 from __future__ import annotations
 
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 from loguru import logger
 from pydantic import BaseModel
 
-from src.orchestrator.agent import Agent
-from src.orchestrator.dependencies import (
-    get_llm_client,
-    get_memory,
-)
-from src.orchestrator.tools import build_tool_map
+from src.orchestrator.graph import create_graph
 
-_agent: Agent | None = None
+_graph: Any = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _agent
+    global _graph
     logger.info("Starting Hospital Conversation Agent API...")
-    llm = get_llm_client()
-    memory = get_memory()
-    if llm is None:
-        logger.warning("LLM client unavailable — agent will return fallback responses")
-    tool_map = build_tool_map()
-    _agent = Agent(llm, tool_map)
+    _graph = create_graph()
     yield
     logger.info("Shutting down Conversation Agent API.")
 
 
 app = FastAPI(
     title="Hospital Conversation Agent API",
-    description=(
-        "AI-powered conversation agent that routes user queries to "
-        "RAG (doctor knowledge) or workflow (appointment booking) tools."
-    ),
-    version="1.0.0",
+    description="LangGraph stateful agent for doctor search and appointment booking.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -65,36 +55,57 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+    status: str = "completed"
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> dict[str, Any]:
-    """Main conversational endpoint. Routes user queries to RAG/workflow tools."""
-    if _agent is None:
+    if _graph is None:
         return {"response": "Agent not initialized. Try again shortly.", "session_id": req.session_id or ""}
 
-    session_id = req.session_id or f"session_{__import__('uuid').uuid4().hex[:8]}"
-    memory = get_memory()
-    memory.get_or_create(session_id, req.tenant_id, req.client_id)
+    session_id = req.session_id or f"session_{uuid.uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": session_id}}
 
-    # Load history and append new message
-    history = memory.get_messages(session_id)
-    history.append({"role": "user", "content": req.message})
+    snapshot = _graph.get_state(config)
+    is_resume = bool(snapshot.next)
 
-    # Run agent
-    updated = await _agent.run(history, tenant_id=req.tenant_id, client_id=req.client_id, session_id=session_id)
+    if is_resume:
+        result = await _graph.ainvoke(Command(resume=req.message), config)
+    else:
+        existing = list(snapshot.values.get("messages", [])) if snapshot.values else []
+        first_call = not existing and snapshot.next is None and not (snapshot.values or {}).get("messages")
 
-    # Save only user + assistant messages (tool calls are ephemeral per turn)
-    memory.clear(session_id)
-    for m in updated:
-        if m["role"] in ("user", "assistant"):
-            memory.add_message(session_id, m["role"], m.get("content") or "")
+        if first_call:
+            result = await _graph.ainvoke(
+                {
+                    "messages": [HumanMessage(content=req.message)],
+                    "session_id": session_id,
+                    "tenant_id": req.tenant_id,
+                    "client_id": req.client_id,
+                    "search_results": [],
+                    "selected_doctor_id": None,
+                    "available_slots": [],
+                    "selected_slot": None,
+                    "patient_phone": None,
+                    "booking_result": None,
+                    "current_phase": "idle",
+                },
+                config,
+            )
+        else:
+            result = await _graph.ainvoke({"messages": [HumanMessage(content=req.message)]}, config)
 
-    # Last assistant message is the response
-    assistant_msgs = [m for m in updated if m["role"] == "assistant"]
-    response = assistant_msgs[-1]["content"] if assistant_msgs else ""
+    snapshot = _graph.get_state(config)
+    has_pending = bool(snapshot.next)
+    msgs = result.get("messages", [])
+    last = msgs[-1] if msgs else None
+    content = last.content if hasattr(last, "content") else str(last or "")
 
-    return {"response": response, "session_id": session_id}
+    return ChatResponse(
+        response=content,
+        session_id=session_id,
+        status="pending_confirmation" if has_pending else "completed",
+    )
 
 
 @app.get("/", tags=["health"])

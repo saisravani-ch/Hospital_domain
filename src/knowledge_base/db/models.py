@@ -139,6 +139,23 @@ class ScheduleDay(Base):
     )
 
 
+class Appointment(Base):
+    """Booked appointment record."""
+    __tablename__ = "appointments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    client_id: Mapped[str] = mapped_column(String, index=True)
+    patient_phone: Mapped[str] = mapped_column(String)
+    doctor_id: Mapped[str] = mapped_column(String, index=True)
+    date: Mapped[str] = mapped_column(String)
+    time: Mapped[str] = mapped_column(String)
+    slot_id: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, default="booked")
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(String)
+    cancelled_at: Mapped[Optional[str]] = mapped_column(String)
+
+
 class TimeSlot(Base):
     """Individual bookable time slot."""
     __tablename__ = "time_slots"

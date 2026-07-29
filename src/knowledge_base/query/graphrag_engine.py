@@ -385,11 +385,23 @@ Please provide a helpful, empathetic response that:
                 tasks.append(asyncio.create_task(
                     self._graph.find_doctors_by_language(language, 8, tid)
                 ))
-            # Fallback: fulltext on query when no structured params
+            # Fallback: fulltext + specialization search on query when no structured params
             if not any([doctor_name, specialization, language]):
                 tasks.append(asyncio.create_task(
                     self._graph.find_by_fulltext(query, 5, tid)
                 ))
+                tasks.append(asyncio.create_task(
+                    self._graph.find_doctors_by_specialization(query, 8, tid)
+                ))
+                # Also try individual non-stop words as specialization searches
+                stopwords = {"a", "an", "the", "i", "me", "my", "need", "find", "for", "and", "or", "to", 
+                             "of", "in", "with", "show", "get", "want", "looking", "doctor", "appointment",
+                             "help", "have", "any", "some", "please", "can", "could", "is", "are", "do"}
+                words = [w.lower() for w in query.split() if w.lower() not in stopwords and len(w) > 2]
+                for w in set(words):
+                    tasks.append(asyncio.create_task(
+                        self._graph.find_doctors_by_specialization(w, 4, tid)
+                    ))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         vector_results = results[0] if not isinstance(results[0], Exception) else []

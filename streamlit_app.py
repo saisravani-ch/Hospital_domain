@@ -64,7 +64,7 @@ with tab_chat:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
         st.text_input("Session ID", value=st.session_state.session_id, key="session_input",
                        on_change=lambda: setattr(st.session_state, "session_id", st.session_state.session_input))
@@ -72,15 +72,17 @@ with tab_chat:
         st.text_input("Tenant ID", value="", key="tenant_input",
                        placeholder="hospital-branch-id (e.g. glh-chn)")
     with col3:
+        st.text_input("Client ID", value="gleneagles_001", key="client_input",
+                       placeholder="booking client id")
+    with col4:
         if st.button("🔄 New Session"):
             st.session_state.session_id = f"test_{uuid.uuid4().hex[:8]}"
             st.session_state.messages = []
+            st.session_state.pending_confirmation = False
             st.rerun()
 
-    # Display chat history
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    if "pending_confirmation" not in st.session_state:
+        st.session_state.pending_confirmation = False
 
     def _send_message(text: str) -> None:
         """Send a message to the agent and append the response to session state."""
@@ -92,6 +94,7 @@ with tab_chat:
             }
             if st.session_state.tenant_input:
                 payload["tenant_id"] = st.session_state.tenant_input
+            payload["client_id"] = st.session_state.client_input or "gleneagles_001"
 
             url = f"{AGENT_URL}/chat"
             result = post(url, payload)
@@ -101,28 +104,47 @@ with tab_chat:
                 response = result.get("response", str(result))
 
         st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.pending_confirmation = result.get("status") == "pending_confirmation"
         st.rerun()
 
-    # Chat input
-    if prompt := st.chat_input("Ask about doctors, book appointments..."):
+    # Display chat history
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Confirmation buttons (shown when graph is paused for booking approval)
+    if st.session_state.pending_confirmation:
+        st.warning("🛑 The agent is waiting for your confirmation to book.")
+        conf_cols = st.columns([1, 1, 6])
+        with conf_cols[0]:
+            if st.button("✅ Yes, confirm booking", type="primary", use_container_width=True):
+                st.session_state.pending_confirmation = False
+                _send_message("yes")
+        with conf_cols[1]:
+            if st.button("❌ No, cancel", use_container_width=True):
+                st.session_state.pending_confirmation = False
+                _send_message("no")
+
+    # Chat input (disabled while waiting for confirmation — use buttons instead)
+    chat_disabled = st.session_state.pending_confirmation
+    if prompt := st.chat_input("Ask about doctors, book appointments...", disabled=chat_disabled):
         _send_message(prompt)
 
-    # Quick action buttons
-    st.divider()
-    st.caption("Quick test queries")
-    qa_cols = st.columns(2)
-    quick_queries = [
-        "I need a heart doctor",
-        "Book an appointment with a cardiologist",
-        "Find a Tamil-speaking doctor",
-        "Orthopaedic surgeon with 10+ years experience",
-        "Show me available slots for today",
-        "What doctors are available in this hospital?",
-    ]
-    for i, q in enumerate(quick_queries):
-        with qa_cols[i % 2]:
-            if st.button(q, key=f"qq_{i}", use_container_width=True):
-                _send_message(q)
+    # Quick action buttons (hidden during confirmation)
+    if not st.session_state.pending_confirmation:
+        st.divider()
+        st.caption("Quick test queries")
+        qa_cols = st.columns(2)
+        quick_queries = [
+            "I need a heart doctor",
+            "Find a Tamil-speaking doctor",
+            "Orthopaedic surgeon with 10+ years experience",
+            "Show me available slots for today",
+        ]
+        for i, q in enumerate(quick_queries):
+            with qa_cols[i % 2]:
+                if st.button(q, key=f"qq_{i}", use_container_width=True):
+                    _send_message(q)
 
 # ── Tab 2: Doctors ───────────────────────────────────────────────────────────────
 

@@ -18,8 +18,6 @@ class AppointmentBookingService:
                 text("SELECT id, time, period FROM time_slots WHERE doctor_id = :did AND date = :date AND available = 1 ORDER BY time"),
                 {"did": doctor_id, "date": date}
             ).fetchall()
-            if not slots:
-                raise ValueError("No available slots for this date")
             return [{"slot_id": s[0], "time": s[1], "period": s[2]} for s in slots]
         finally:
             self.db.close()

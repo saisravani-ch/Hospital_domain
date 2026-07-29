@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 
 # pyrefly: ignore [missing-import]
 from src.knowledge_base.api.dependencies import get_graph_engine, get_vector_store
 from src.knowledge_base.graph.neo4j_loader import Neo4jQueryEngine
 from src.knowledge_base.rag.vector_store import VectorStore
+from src.knowledge_base.db.database import get_session
 
 router = APIRouter(prefix="/doctors", tags=["doctors"])
 
@@ -23,6 +25,19 @@ async def get_doctor(
     doc = await graph.get_doctor_context(doctor_id)
     if not doc:
         raise HTTPException(status_code=404, detail=f"Doctor '{doctor_id}' not found")
+
+    # Supplement transactional data from SQLite (not stored in Neo4j)
+    session = get_session()
+    try:
+        row = session.execute(
+            text("SELECT consultation_fee FROM doctors WHERE id = :did"),
+            {"did": doctor_id},
+        ).fetchone()
+        if row and row[0] is not None:
+            doc["consultation_fee"] = row[0]
+    finally:
+        session.close()
+
     return doc
 
 
