@@ -1,212 +1,143 @@
 from __future__ import annotations
 
-import os
-from typing import Any
+from datetime import date
+from functools import lru_cache
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 
-# Load .env into os.environ so LangSmith tracing vars are visible
 load_dotenv()
 
-from collections.abc import Sequence
-
-from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, SystemMessage, ToolMessage
-from langchain_core.runnables.config import RunnableConfig
-from loguru import logger
-from pydantic import BaseModel
+from langchain_core.messages import SystemMessage
 from langchain_openai import AzureChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode
-from langgraph.runtime import Runtime
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
+from loguru import logger
+from pydantic import BaseModel
 
-from src.knowledge_base.config import get_settings, get_tenant_config
-from src.orchestrator.langgraph_tools import (
-    book_appointment,
-    cancel_appointment,
-    check_availability,
-    get_doctor_info,
-    reschedule_appointment,
-    search_doctors,
-)
-from src.orchestrator.prompts import SYSTEM_PROMPT_TEMPLATE
+from src.config import get_settings
+from src.orchestrator._shared import build_llm, get_tenant_config
+from src.orchestrator.skills.search.graph import search_graph
+from src.orchestrator.skills.booking.graph import booking_graph
 from src.orchestrator.state import HospitalAgentState
 
 settings = get_settings()
 
-_TOOLS = [
-    search_doctors,
-    get_doctor_info,
-    check_availability,
-    book_appointment,
-    reschedule_appointment,
-    cancel_appointment,
-]
+_CHAT_PROMPT = ("You are a friendly assistant for {brand_name}. "
+                "Respond warmly to greetings, thanks, and casual conversation. "
+                "Keep it brief and helpful. Do NOT offer medical advice.")
 
 
-def _merge_commands(outputs: list) -> list:
-    """Merge state updates from concurrent Commands into one to avoid channel conflicts.
-
-    LangGraph crashes if two Commands write to the same plain-list channel
-    in one step.  This combines all update dicts (last-write-wins) and all
-    Command messages into a single Command.
-    """
-    merged: dict[str, Any] = {}
-    merged_msgs: list[ToolMessage] = []
-    rest: list = []
-
-    for item in outputs:
-        if isinstance(item, Command):
-            update = item.update if isinstance(item.update, dict) else {}
-            for k, v in update.items():
-                if k == "messages":
-                    if isinstance(v, list):
-                        merged_msgs.extend(v)
-                    else:
-                        merged_msgs.append(v)
-                else:
-                    merged[k] = v
-        else:
-            rest.append(item)
-
-    if merged or merged_msgs:
-        cmd_update = {**merged}
-        if merged_msgs:
-            cmd_update["messages"] = merged_msgs
-        rest.insert(0, Command(update=cmd_update))
-    return rest
+class RouterOutput(BaseModel):
+    skill: Literal["search", "booking", "both", "chat"]
+    reason: str = ""
 
 
-class MergingToolNode(ToolNode):
-    """ToolNode that merges concurrent Command updates to prevent channel write conflicts."""
+_ROUTER_PROMPT = """You are a router for a hospital assistant system. Classify the user's latest message.
 
-    async def _afunc(
-        self,
-        input: list[AnyMessage] | dict[str, Any] | BaseModel,
-        config: RunnableConfig,
-        runtime: Runtime,
-    ) -> Any:
-        result = await super()._afunc(input, config, runtime)
-        return _merge_commands(result)
+- "search" — User wants to find a doctor, describe symptoms, ask about specialties/conditions, or get doctor info
+- "booking" — User wants to check availability, book, reschedule, or cancel an appointment
+- "both" — User's request spans both search AND booking (e.g. "find a cardiologist and book for Tuesday")
+- "chat" — Greetings, thanks, simple conversation, or anything not requiring a tool
 
-    def _func(
-        self,
-        input: list[AnyMessage] | dict[str, Any] | BaseModel,
-        config: RunnableConfig,
-        runtime: Runtime,
-    ) -> Any:
-        result = super()._func(input, config, runtime)
-        return _merge_commands(result)
+IMPORTANT — Pending skill: {pending_context}
+If the user's message is selecting a doctor, confirming details, or continuing the pending flow, route to "booking".
+If the user starts a completely new request (e.g. new search topic, unrelated question), ignore the pending skill and classify normally.
+
+Respond with ONLY the appropriate skill name and a brief reason."""
 
 
-tool_node = MergingToolNode(_TOOLS)
-
-
-def _build_llm() -> AzureChatOpenAI:
-    kwargs = dict(
+@lru_cache(1)
+def _build_router_llm() -> AzureChatOpenAI:
+    return AzureChatOpenAI(
         azure_endpoint=settings.azure_openai_endpoint,
         api_key=settings.azure_openai_api_key,
         api_version=settings.azure_openai_api_version,
         deployment_name=settings.azure_openai_deployment_name,
-        temperature=0.3,
-        max_tokens=1024,
-    )
-    return AzureChatOpenAI(**kwargs)
+        temperature=0,
+        max_tokens=256,
+    ).with_structured_output(RouterOutput)
 
 
-def _build_system(state: HospitalAgentState) -> str:
-    from datetime import date
+async def router_node(state: HospitalAgentState) -> Command:
+    msgs = state.get("messages", [])
+    if not msgs:
+        return Command(goto=END)
+
+    last = msgs[-1]
+    content = last.content if hasattr(last, "content") else str(last)
+
+    if not content.strip():
+        return Command(goto=END)
+
+    pending = state.get("pending_skill")
+    pending_context = f"There is a pending booking skill. The user was previously shown doctor search results and asked to pick one." if pending else "None."
+
+    llm = _build_router_llm()
+    system = SystemMessage(content=_ROUTER_PROMPT.format(pending_context=pending_context))
+    history = list(msgs)[-4:]
+    try:
+        result: RouterOutput = await llm.ainvoke([system] + history)
+        skill = result.skill
+    except Exception as e:
+        logger.warning(f"Router failed ({e}), defaulting to chat")
+        skill = "chat"
+
+    if skill == "both":
+        return Command(goto="search_skill", update={"pending_skill": "booking_skill"})
+    elif skill == "booking":
+        return Command(goto="booking_skill", update={"pending_skill": None})
+    elif skill == "search":
+        return Command(goto="search_skill", update={"pending_skill": None})
+    return Command(goto="chat_skill", update={"pending_skill": None})
+
+
+@lru_cache(1)
+def _build_chat_llm():
+    return build_llm(temperature=0.7, max_tokens=256)
+
+
+async def chat_node(state: HospitalAgentState) -> dict[str, Any]:
+    llm = _build_chat_llm()
     tc = get_tenant_config(state.get("tenant_id"))
-    system = tc.format(SYSTEM_PROMPT_TEMPLATE)
-    system += f"\nToday's date: {date.today().isoformat()}"
-    cid = state.get("client_id")
-    if cid:
-        system += f"\n\nClient/hospital ID for booking: {cid}"
-    return system
-
-
-async def assistant_node(state: HospitalAgentState) -> dict[str, Any]:
-    llm = _build_llm().bind_tools(_TOOLS)
-    system = _build_system(state)
-    messages = [SystemMessage(content=system)] + list(state["messages"])
+    prompt = tc.format(_CHAT_PROMPT)
+    prompt += f"\nToday's date: {date.today().isoformat()}"
+    system = SystemMessage(content=prompt)
+    messages = [system] + list(state["messages"])
     response = await llm.ainvoke(messages)
     return {"messages": [response]}
 
 
-def human_confirmation_node(state: HospitalAgentState) -> dict[str, Any]:
-    last_ai = None
-    for msg in reversed(state["messages"]):
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            last_ai = msg
-            break
+workflow = StateGraph(HospitalAgentState)
 
-    if last_ai:
-        for tc in last_ai.tool_calls:
-            if tc.get("name") == "book_appointment":
-                args = tc.get("args", {})
-                msg = (
-                    f"Please confirm the appointment:\n"
-                    f"  Doctor ID: {args.get('doctor_id', 'unknown')}\n"
-                    f"  Date: {args.get('date', 'unknown')}\n"
-                    f"  Time: {args.get('time', 'unknown')}\n"
-                    f"  Phone: {args.get('patient_phone', 'unknown')}\n"
-                    f"\nReply 'yes' to confirm or 'no' to cancel."
-                )
-                confirmation = interrupt(msg)
-                if confirmation and str(confirmation).strip().lower()[:1] == "y":
-                    return {"current_phase": "booking_confirmed"}
-                return {"current_phase": "booking_cancelled"}
+workflow.add_node("router", router_node)
+workflow.add_node("search_skill", search_graph)
+workflow.add_node("booking_skill", booking_graph)
+workflow.add_node("chat_skill", chat_node)
 
-    return {}
+workflow.set_entry_point("router")
+
+workflow.add_edge("search_skill", END)
+workflow.add_edge("booking_skill", END)
+workflow.add_edge("chat_skill", END)
+
+graph = workflow.compile(checkpointer=MemorySaver())
 
 
-def should_continue(state: HospitalAgentState) -> str:
-    if not state["messages"]:
-        return END
-    last = state["messages"][-1]
-    if isinstance(last, AIMessage) and last.tool_calls:
-        for tc in last.tool_calls:
-            if tc.get("name") == "book_appointment":
-                return "human_confirmation"
-        return "tools"
-    return END
-
-
-def after_confirmation(state: HospitalAgentState) -> str:
-    phase = state.get("current_phase", "")
-    if phase == "booking_confirmed":
-        return "tools"
-    return "assistant"
-
-
-def create_graph(
+def build_test_graph(
     *,
-    assistant_node_override: callable | None = None,
-    tool_node_override: ToolNode | None = None,
+    router_override=None,
+    search_subgraph=None,
+    booking_subgraph=None,
 ) -> Any:
-    actual_assistant = assistant_node_override or assistant_node
-    actual_tool_node = tool_node_override or tool_node
-
-    workflow = StateGraph(HospitalAgentState)
-
-    workflow.add_node("assistant", actual_assistant)
-    workflow.add_node("tools", actual_tool_node)
-    workflow.add_node("human_confirmation", human_confirmation_node)
-
-    workflow.set_entry_point("assistant")
-
-    workflow.add_conditional_edges("assistant", should_continue, {
-        "tools": "tools",
-        "human_confirmation": "human_confirmation",
-        END: END,
-    })
-
-    workflow.add_edge("tools", "assistant")
-
-    workflow.add_conditional_edges("human_confirmation", after_confirmation, {
-        "tools": "tools",
-        "assistant": "assistant",
-    })
-
-    return workflow.compile(checkpointer=MemorySaver())
+    wf = StateGraph(HospitalAgentState)
+    wf.add_node("router", router_override or router_node)
+    wf.add_node("search_skill", search_subgraph or search_graph)
+    wf.add_node("booking_skill", booking_subgraph or booking_graph)
+    wf.add_node("chat_skill", chat_node)
+    wf.set_entry_point("router")
+    wf.add_edge("search_skill", END)
+    wf.add_edge("booking_skill", END)
+    wf.add_edge("chat_skill", END)
+    return wf.compile(checkpointer=MemorySaver())

@@ -11,7 +11,6 @@ Collections:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +31,6 @@ class VectorStore:
         self._persist_dir = persist_dir or settings.chroma_persist_dir
         Path(self._persist_dir).mkdir(parents=True, exist_ok=True)
 
-        # chromadb 1.x: Settings moved; use keyword arg directly
         self._client = chromadb.PersistentClient(
             path=self._persist_dir,
         )
@@ -56,36 +54,7 @@ class VectorStore:
     def _collection_for(self, chunk_type: str):
         if chunk_type == "expertise":
             return self._expertise
-        return self._profiles  # profile + appointment_context go to profiles collection
-
-    def upsert_chunks(self, chunks: list[dict], batch_size: int = 64):
-        """Embed and upsert text chunks into the appropriate collections."""
-        # Group by collection
-        by_col: dict[str, list[dict]] = {}
-        for chunk in chunks:
-            col_key = "expertise" if chunk["chunk_type"] == "expertise" else "profiles"
-            by_col.setdefault(col_key, []).append(chunk)
-
-        for col_key, col_chunks in by_col.items():
-            collection = self._expertise if col_key == "expertise" else self._profiles
-            logger.info(f"Upserting {len(col_chunks)} chunks → {col_key} collection")
-
-            for i in range(0, len(col_chunks), batch_size):
-                batch = col_chunks[i : i + batch_size]
-                ids = [c["id"] for c in batch]
-                texts = [c["text"] for c in batch]
-                metadatas = [_sanitize_meta(c["metadata"]) for c in batch]
-                embeddings = self._embed(texts)
-
-                collection.upsert(
-                    ids=ids,
-                    embeddings=embeddings,
-                    documents=texts,
-                    metadatas=metadatas,
-                )
-                logger.info(f"  Batch {i//batch_size + 1}: {len(batch)} chunks done")
-
-        logger.success(f"Vector store upsert complete. Total chunks: {len(chunks)}")
+        return self._profiles
 
     def semantic_search(
         self,
@@ -148,14 +117,6 @@ class VectorStore:
             chunks.append({"id": rid, "text": doc, "metadata": meta})
         return chunks
 
-    def load_from_file(self, chunks_path: str | None = None):
-        """Load chunks.json and upsert into ChromaDB."""
-        path = Path(chunks_path or settings.processed_data_dir) / "chunks.json"
-        chunks = json.loads(path.read_text(encoding="utf-8"))
-        logger.info(f"Loading {len(chunks)} chunks from {path}")
-        self.upsert_chunks(chunks)
-
-
 def _sanitize_meta(meta: dict) -> dict:
     """ChromaDB metadata values must be str/int/float/bool."""
     clean = {}
@@ -169,8 +130,3 @@ def _sanitize_meta(meta: dict) -> dict:
         else:
             clean[k] = str(v)
     return clean
-
-
-if __name__ == "__main__":
-    store = VectorStore()
-    store.load_from_file()

@@ -25,6 +25,7 @@ class RetrieveRequest(BaseModel):
     doctor_name: Optional[str] = None
     language: Optional[str] = None
     min_experience: Optional[int] = None
+    location: Optional[str] = None
 
 
 @router.post("/retrieve")
@@ -42,6 +43,7 @@ async def retrieve_doctors(
         doctor_name=req.doctor_name,
         language=req.language,
         min_experience=req.min_experience,
+        location=req.location,
     )
 
     # Supplement consultation_fee from SQLite (transactional data, not in Neo4j)

@@ -5,6 +5,7 @@ from src.workflows.api.schemas import (
     BookAppointmentRequest, BookAppointmentResponse,
     RescheduleAppointmentRequest, RescheduleAppointmentResponse,
     CancelAppointmentRequest, CancelAppointmentResponse,
+    ListAppointmentsResponse, AppointmentInfo,
     AvailableSlot
 )
 
@@ -82,6 +83,24 @@ def cancel_appointment(req: CancelAppointmentRequest) -> CancelAppointmentRespon
         return CancelAppointmentResponse(**result)
     except Exception as e:
         handle_service_error(e, req.client_id)
+
+
+@router.get("", response_model=ListAppointmentsResponse)
+def list_appointments(
+    client_id: str = Query(...),
+    phone: str = Query(...),
+) -> ListAppointmentsResponse:
+    """List appointments for a patient by phone number."""
+    try:
+        service = get_booking_service(client_id)
+        appointments = service.get_appointments_by_phone(phone)
+        return ListAppointmentsResponse(
+            appointments=[AppointmentInfo(**a) for a in appointments],
+            client_id=client_id,
+            phone=phone,
+        )
+    except Exception as e:
+        handle_service_error(e, client_id)
 
 
 @router.get("/health")

@@ -72,3 +72,22 @@ class CancelAppointmentResponse(BaseModel):
     status: str
     client_id: str
     cancelled_at: str
+
+
+class AppointmentInfo(BaseModel):
+    appointment_id: str
+    patient_phone: str
+    doctor_id: str
+    doctor_name: str | None = None
+    speciality: str | None = None
+    date: str
+    time: str
+    status: str
+    notes: str | None = None
+    booked_at: str
+
+
+class ListAppointmentsResponse(BaseModel):
+    appointments: list[AppointmentInfo]
+    client_id: str
+    phone: str

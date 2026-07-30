@@ -20,3 +20,5 @@ class HospitalAgentState(TypedDict):
     booking_result: dict | None
 
     current_phase: str
+    pending_skill: str | None
+    user_location: str | None

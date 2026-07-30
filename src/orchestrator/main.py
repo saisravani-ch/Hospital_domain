@@ -16,7 +16,7 @@ from langgraph.types import Command
 from loguru import logger
 from pydantic import BaseModel
 
-from src.orchestrator.graph import create_graph
+from src.orchestrator.graph import graph as agent_graph
 
 _graph: Any = None
 
@@ -25,7 +25,7 @@ _graph: Any = None
 async def lifespan(app: FastAPI):
     global _graph
     logger.info("Starting Hospital Conversation Agent API...")
-    _graph = create_graph()
+    _graph = agent_graph
     yield
     logger.info("Shutting down Conversation Agent API.")
 
@@ -89,6 +89,8 @@ async def chat(req: ChatRequest) -> dict[str, Any]:
                     "patient_phone": None,
                     "booking_result": None,
                     "current_phase": "idle",
+                    "pending_skill": None,
+                    "user_location": None,
                 },
                 config,
             )

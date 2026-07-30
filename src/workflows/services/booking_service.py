@@ -1,15 +1,24 @@
+from functools import lru_cache
+
+from datetime import datetime, timezone
+
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
 import uuid
 from src.workflows.config import get_database_url, get_client_config
+
+
+@lru_cache
+def _get_engine(client_id: str) -> Engine:
+    return create_engine(get_database_url(client_id), connect_args={"check_same_thread": False})
 
 
 class AppointmentBookingService:
     def __init__(self, client_id: str):
         self.client_id = client_id
         self.config = get_client_config(client_id)
-        engine = create_engine(get_database_url(client_id), connect_args={"check_same_thread": False})
+        engine = _get_engine(client_id)
         self.db = sessionmaker(bind=engine)()
 
     def get_availability(self, doctor_id: str, date: str) -> list:
@@ -19,6 +28,37 @@ class AppointmentBookingService:
                 {"did": doctor_id, "date": date}
             ).fetchall()
             return [{"slot_id": s[0], "time": s[1], "period": s[2]} for s in slots]
+        finally:
+            self.db.close()
+
+    def get_appointments_by_phone(self, phone: str) -> list[dict]:
+        try:
+            rows = self.db.execute(
+                text("""
+                    SELECT a.id, a.patient_phone, a.doctor_id, d.name AS doctor_name,
+                           d.speciality, a.date, a.time, a.status, a.notes, a.created_at
+                    FROM appointments a
+                    LEFT JOIN doctors d ON d.id = a.doctor_id
+                    WHERE a.patient_phone = :phone AND a.client_id = :cid
+                    ORDER BY a.created_at DESC
+                """),
+                {"phone": phone, "cid": self.client_id}
+            ).fetchall()
+            return [
+                {
+                    "appointment_id": r[0],
+                    "patient_phone": r[1],
+                    "doctor_id": r[2],
+                    "doctor_name": r[3],
+                    "speciality": r[4],
+                    "date": r[5],
+                    "time": r[6],
+                    "status": r[7],
+                    "notes": r[8],
+                    "booked_at": r[9],
+                }
+                for r in rows
+            ]
         finally:
             self.db.close()
 
@@ -56,7 +96,7 @@ class AppointmentBookingService:
                     "slot": slot[0],
                     "status": "booked",
                     "notes": notes,
-                    "created": datetime.utcnow().isoformat()
+                    "created": datetime.now(timezone.utc).isoformat()
                 }
             )
             self.db.commit()
@@ -74,7 +114,7 @@ class AppointmentBookingService:
                 "client_id": self.client_id,
                 "client_name": self.config["name"],
                 "notes": notes,
-                "booked_at": datetime.utcnow().isoformat(),
+                "booked_at": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             self.db.rollback()
@@ -123,7 +163,7 @@ class AppointmentBookingService:
                 "new_date": new_date,
                 "new_time": new_time,
                 "client_id": self.client_id,
-                "rescheduled_at": datetime.utcnow().isoformat(),
+                "rescheduled_at": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             self.db.rollback()
@@ -153,7 +193,7 @@ class AppointmentBookingService:
 
             self.db.execute(
                 text("UPDATE appointments SET status = 'cancelled', cancelled_at = :cancelled WHERE id = :id"),
-                {"cancelled": datetime.utcnow().isoformat(), "id": appointment_id}
+                {"cancelled": datetime.now(timezone.utc).isoformat(), "id": appointment_id}
             )
             self.db.commit()
 
@@ -161,7 +201,7 @@ class AppointmentBookingService:
                 "appointment_id": appointment_id,
                 "status": "cancelled",
                 "client_id": self.client_id,
-                "cancelled_at": datetime.utcnow().isoformat(),
+                "cancelled_at": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             self.db.rollback()

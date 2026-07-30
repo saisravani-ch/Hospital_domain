@@ -75,6 +75,8 @@ def base_state():
         "patient_phone": None,
         "booking_result": None,
         "current_phase": "idle",
+        "pending_skill": None,
+        "user_location": None,
     }
 
 

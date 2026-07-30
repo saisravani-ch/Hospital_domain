@@ -4,7 +4,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END
 
-from src.orchestrator.graph import after_confirmation, should_continue
+from src.orchestrator.skills.booking.graph import after_confirmation, should_continue
 
 
 class TestShouldContinue:

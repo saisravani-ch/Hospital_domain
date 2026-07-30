@@ -8,18 +8,42 @@ import httpx
 
 WF_BASE = os.getenv("WF_URL", "http://localhost:8001")
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client(timeout: float = 15) -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
+    return _client
+
 
 async def _fetch_slots(doctor_id: str, d: str, client_id: str) -> list[dict] | None:
     """Fetch slots for a single date; returns None on error."""
     try:
         params = {"client_id": client_id, "doctor_id": doctor_id, "date": d}
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{WF_BASE}/appointments/availability", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("slots", [])
+        client = _get_client()
+        resp = await client.get(f"{WF_BASE}/appointments/availability", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("slots", [])
     except httpx.HTTPError:
         return None
+
+
+async def get_appointments_by_phone(
+    phone: str,
+    client_id: str,
+) -> dict[str, Any]:
+    """Look up appointments for a patient by phone number via workflows HTTP API."""
+    try:
+        params = {"client_id": client_id, "phone": phone}
+        client = _get_client()
+        resp = await client.get(f"{WF_BASE}/appointments", params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPError as e:
+        return {"error": str(e)}
 
 
 async def check_availability(
@@ -86,10 +110,10 @@ async def book_appointment(
         }
         if notes:
             body["notes"] = notes
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"{WF_BASE}/appointments/book", json=body)
-            resp.raise_for_status()
-            return resp.json()
+        client = _get_client()
+        resp = await client.post(f"{WF_BASE}/appointments/book", json=body)
+        resp.raise_for_status()
+        return resp.json()
     except httpx.HTTPError as e:
         return {"error": str(e)}
 
@@ -108,10 +132,10 @@ async def reschedule_appointment(
             "new_date": new_date,
             "new_time": new_time,
         }
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"{WF_BASE}/appointments/reschedule", json=body)
-            resp.raise_for_status()
-            return resp.json()
+        client = _get_client()
+        resp = await client.post(f"{WF_BASE}/appointments/reschedule", json=body)
+        resp.raise_for_status()
+        return resp.json()
     except httpx.HTTPError as e:
         return {"error": str(e)}
 
@@ -126,9 +150,9 @@ async def cancel_appointment(
             "client_id": client_id,
             "appointment_id": appointment_id,
         }
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"{WF_BASE}/appointments/cancel", json=body)
-            resp.raise_for_status()
-            return resp.json()
+        client = _get_client()
+        resp = await client.post(f"{WF_BASE}/appointments/cancel", json=body)
+        resp.raise_for_status()
+        return resp.json()
     except httpx.HTTPError as e:
         return {"error": str(e)}

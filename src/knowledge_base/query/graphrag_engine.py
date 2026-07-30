@@ -349,6 +349,7 @@ Please provide a helpful, empathetic response that:
         doctor_name: str | None = None,
         language: str | None = None,
         min_experience: int | None = None,
+        location: str | None = None,
     ) -> tuple[list[dict], str, list[dict]]:
         """
         Multi-target retrieval using structured params extracted by the agent.
@@ -430,6 +431,20 @@ Please provide a helpful, empathetic response that:
             for d in fused
             if d.get("booking_url") or d.get("profile_url")
         ]
+
+        if location:
+            loc_lower = location.strip().lower()
+            city_filtered = []
+            seen = set()
+            for d in fused:
+                cities = d.get("cities") or []
+                match = any(loc_lower in c.lower() for c in cities)
+                key = d.get("doctor_id") or d.get("id") or d.get("name", "")
+                if match and key not in seen:
+                    seen.add(key)
+                    city_filtered.append(d)
+            if city_filtered:
+                fused = city_filtered
 
         return fused, context_text, booking_links
 
