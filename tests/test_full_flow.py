@@ -10,15 +10,15 @@ from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode, ToolRuntime
 from langgraph.types import Command
 
-from src.orchestrator.graph import build_test_graph
-from src.orchestrator._shared import MergingToolNode
-from src.orchestrator.skills.booking.graph import (
+from apps.agent.graph import build_test_graph
+from apps.agent.shared import MergingToolNode
+from apps.agent.skills.booking.graph import (
     after_confirmation,
     human_confirmation_node,
     should_continue as booking_should_continue,
 )
-from src.orchestrator.skills.search.graph import should_continue as search_should_continue
-from src.orchestrator.state import HospitalAgentState
+from apps.agent.skills.search.graph import should_continue as search_should_continue
+from apps.agent.state import HospitalAgentState
 from tests.conftest import MOCK_BOOKING, MOCK_DOCTOR_INFO, MOCK_DOCTORS, MOCK_SLOTS
 
 # ── Mock tools (named to match real tool names so should_continue recognizes them) ──

@@ -1,0 +1,160 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: langfuse-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: default
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: langfuse-clickhouse
+    restart: always
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse_password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - chdata:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --password clickhouse_password --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: langfuse-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: langfuse-minio
+    restart: always
+    ports:
+      - "9001:9001"
+      - "9002:9002"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123!
+    command: server /data --console-address ":9001" --address ":9002"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9002/minio/health/live > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  createbuckets:
+    image: minio/mc:latest
+    container_name: langfuse-createbuckets
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      sleep 2;
+      mc alias set s3 http://minio:9002 minio minio123!;
+      mc mb s3/langfuse-events --ignore-existing;
+      echo 'Bucket created';
+      "
+    restart: "no"
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: langfuse-server
+    restart: always
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXTAUTH_SECRET=my_super_secret_nextauth_key_change_me
+      - NEXTAUTH_URL=http://localhost:3000
+      - SALT=mysupersecretsalt12345678901234567890
+      - LANGFUSE_INIT_ORG_ID=hospital-org
+      - LANGFUSE_INIT_ORG_NAME=HospitalSystem
+      - LANGFUSE_INIT_PROJECT_ID=default-project
+      - LANGFUSE_INIT_PROJECT_NAME=Default
+      - LANGFUSE_INIT_MEMBER_EMAIL=admin@hospital.com
+      - LANGFUSE_INIT_MEMBER_FIRST_NAME=Admin
+      - LANGFUSE_INIT_PASSWORD=Admin123!
+      - ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+      - DATABASE_URL=postgresql://root:password@db:5432/default
+      - CLICKHOUSE_URL=http://clickhouse:8123/default
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://default:clickhouse_password@clickhouse:9000/default?x-multi-statement=true&x-no-cluster=true
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse_password
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - REDIS_CONNECTION_STRING=redis://redis:6379
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse-events
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio123!
+      - AWS_ENDPOINT=http://minio:9002
+      - AWS_REGION=us-east-1
+      - AWS_S3_FORCE_PATH_STYLE=true
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:latest
+    container_name: langfuse-worker
+    restart: always
+    depends_on:
+      createbuckets:
+        condition: service_completed_successfully
+    environment:
+      - NODE_ENV=production
+      - SALT=mysupersecretsalt12345678901234567890
+      - ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+      - DATABASE_URL=postgresql://root:password@db:5432/default
+      - CLICKHOUSE_URL=http://clickhouse:8123/default
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://default:clickhouse_password@clickhouse:9000/default?x-multi-statement=true&x-no-cluster=true
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse_password
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - REDIS_CONNECTION_STRING=redis://redis:6379
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse-events
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio123!
+      - AWS_ENDPOINT=http://minio:9002
+      - AWS_REGION=us-east-1
+      - AWS_S3_FORCE_PATH_STYLE=true
+
+volumes:
+  pgdata:
+  chdata:
+  miniodata:

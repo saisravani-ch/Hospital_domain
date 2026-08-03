@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from src.orchestrator.skills.booking.graph import human_confirmation_node
+from apps.agent.skills.booking.graph import human_confirmation_node
 
 
 def _make_ai_with_book_tool(doctor_id="dr-susan-george", date="2026-07-29", time="10:30", phone="+919999999999"):
@@ -50,7 +50,7 @@ class TestHumanConfirmationNode:
         msg = _make_ai_with_book_tool()
         state = {**base_state, "messages": [msg]}
 
-        with patch("src.orchestrator.skills.booking.graph.interrupt", return_value="yes") as mock_interrupt:
+        with patch("apps.agent.skills.booking.graph.interrupt", return_value="yes") as mock_interrupt:
             result = human_confirmation_node(state)
 
             mock_interrupt.assert_called_once()
@@ -65,7 +65,7 @@ class TestHumanConfirmationNode:
         msg = _make_ai_with_book_tool()
         state = {**base_state, "messages": [msg]}
 
-        with patch("src.orchestrator.skills.booking.graph.interrupt", return_value="no") as mock_interrupt:
+        with patch("apps.agent.skills.booking.graph.interrupt", return_value="no") as mock_interrupt:
             result = human_confirmation_node(state)
 
             assert result["current_phase"] == "booking_cancelled"
@@ -74,7 +74,7 @@ class TestHumanConfirmationNode:
         msg = _make_ai_with_book_tool()
         state = {**base_state, "messages": [msg]}
 
-        with patch("src.orchestrator.skills.booking.graph.interrupt", return_value="") as mock_interrupt:
+        with patch("apps.agent.skills.booking.graph.interrupt", return_value="") as mock_interrupt:
             result = human_confirmation_node(state)
 
             assert result["current_phase"] == "booking_cancelled"
@@ -84,7 +84,7 @@ class TestHumanConfirmationNode:
         state = {**base_state, "messages": [msg]}
 
         for variant in ["y", "Y", "yes", "Yes", "YES", "yeah sure"]:
-            with patch("src.orchestrator.skills.booking.graph.interrupt", return_value=variant):
+            with patch("apps.agent.skills.booking.graph.interrupt", return_value=variant):
                 result = human_confirmation_node(state)
                 assert result["current_phase"] == "booking_confirmed", f"Failed for '{variant}'"
 
@@ -93,7 +93,7 @@ class TestHumanConfirmationNode:
         state = {**base_state, "messages": [msg]}
 
         for variant in ["n", "N", "no", "No", "NO", "not now"]:
-            with patch("src.orchestrator.skills.booking.graph.interrupt", return_value=variant):
+            with patch("apps.agent.skills.booking.graph.interrupt", return_value=variant):
                 result = human_confirmation_node(state)
                 assert result["current_phase"] == "booking_cancelled", f"Failed for '{variant}'"
 
@@ -105,6 +105,6 @@ class TestHumanConfirmationNode:
         late = _make_ai_with_book_tool()
         state = {**base_state, "messages": [early, late]}
 
-        with patch("src.orchestrator.skills.booking.graph.interrupt", return_value="yes"):
+        with patch("apps.agent.skills.booking.graph.interrupt", return_value="yes"):
             result = human_confirmation_node(state)
             assert result["current_phase"] == "booking_confirmed"

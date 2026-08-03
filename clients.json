@@ -1,0 +1,7 @@
+{
+  "gleneagles_001": {
+    "name": "Gleneagles Hospitals",
+    "db_path": "data/db/knowledge_base.db",
+    "whatsapp_account": "wabp_gleneagles"
+  }
+}

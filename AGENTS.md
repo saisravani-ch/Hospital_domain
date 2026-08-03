@@ -6,10 +6,10 @@ Two of the three services require Neo4j + ChromaDB + Azure OpenAI. The agent and
 
 | App | Port | Command |
 |---|---|---|
-| Knowledge Base (KB) | 8000 | `uvicorn src.knowledge_base.api.main:app --reload --port 8000` |
-| Workflows | 8001 | `uvicorn src.workflows.main:app --reload --port 8001` |
-| Agent (orchestrator) | 8002 | `uvicorn src.orchestrator.main:app --reload --port 8002` |
-| Streamlit UI | 8501 | `streamlit run streamlit_app.py` |
+| Knowledge Base (KB) | 8000 | `uvicorn apps.kb.api.main:app --reload --port 8000` |
+| Workflows | 8001 | `uvicorn apps.workflows.main:app --reload --port 8001` |
+| Agent (orchestrator) | 8002 | `uvicorn apps.agent.main:app --reload --port 8002` |
+| Streamlit UI | 8501 | `streamlit run apps\ui\streamlit_app.py` |
 
 `.\run_all.ps1` launches all four in separate terminal windows.
 
@@ -17,10 +17,10 @@ No `setup.py`/`pyproject.toml` — `pip install -r requirements.txt` is the only
 
 ## Two config systems, one env file
 
-- **KB** (`knowledge_base/config.py`): `pydantic-settings` reads `.env` from project root
-- **Workflows** (`workflows/config.py`): raw `os.getenv()` + **hardcoded CLIENTS dict** — `client_id` must be in `CLIENTS` or you get `ValueError`. Only `"gleneagles_001"` exists by default.
+- **KB** (`apps/kb/config.py`): `pydantic-settings` reads `.env` from project root
+- **Workflows** (`apps/workflows/config.py`): raw `os.getenv()` + **hardcoded CLIENTS dict** — `client_id` must be in `CLIENTS` or you get `ValueError`. Only `"gleneagles_001"` exists by default.
 - **Orchestrator** imports KB's `get_settings()` — same env file
-- **Tools** (`src/tools/graphrag_tool.py`, `workflow_tool.py`): read `KB_URL` / `WF_URL` from env (default `http://localhost:8000` / `8001`)
+- **Tools** (`apps/agent/tools/graphrag_tool.py`, `apps/agent/tools/workflow_tool.py`): read `KB_URL` / `WF_URL` from env (default `http://localhost:8000` / `8001`)
 
 ## Architecture: LangGraph stateful agent (Command pattern)
 
@@ -44,15 +44,19 @@ State persists across conversation turns via `MemorySaver` checkpointer (thread_
 The `status` field in `ChatResponse` tells the UI whether the graph completed or is waiting for confirmation (`"pending_confirmation"`).
 
 ### Key files:
-- `state.py` — `HospitalAgentState` TypedDict with typed fields + `add_messages` reducer
-- `langgraph_tools.py` — `@tool` wrappers around HTTP tools, each returning `Command(update={...})` to emit state fields + `ToolMessage` directly. Injects `tenant_id`/`client_id` via `InjectedState`, and `tool_call_id` via `ToolRuntime`
-- `graph.py` — `StateGraph` with `assistant` → `tools` → `assistant` loop, `human_confirmation` interrupt for booking
+- `apps/agent/state.py` — `HospitalAgentState` TypedDict with typed fields + `add_messages` reducer
+- `apps/agent/skills/shared/doctor_tools.py` — `@tool` wrappers for doctor search, shared by BOTH skills (no skill-to-skill imports)
+- `apps/agent/skills/search/tools.py` — thin re-export of the shared doctor tools
+- `apps/agent/skills/booking/tools.py` — `@tool` wrappers around workflow HTTP calls, each returning `Command(update=...)` to emit state fields + `ToolMessage` directly. Injects `tenant_id`/`client_id` via `InjectedState`, and `tool_call_id` via `ToolRuntime`
+- `apps/agent/graph.py` — `StateGraph` with `assistant` → `tools` → `assistant` loop, `human_confirmation` interrupt for booking
+
+Skills are decoupled: no skill imports from another skill; tools never call other tools — the LLM orchestrates by calling tools in sequence.
 
 Only `langgraph` + `langchain-openai` added to deps. No full LangChain agent frameworks.
 
 ## Tool HTTP boundaries
 
-Tools in `src/tools/` call downstream services via `httpx.AsyncClient`:
+Tools in `apps/agent/tools/` call downstream services via `httpx.AsyncClient`:
 - `search_doctors` / `get_doctor_info` → `KB_BASE/search/retrieve` (POST) / `KB_BASE/doctors/{id}` (GET)
 - `check_availability` / `book_appointment` / `reschedule` / `cancel` → `WF_BASE/appointments/*`
 
@@ -67,7 +71,7 @@ Tools in `src/tools/` call downstream services via `httpx.AsyncClient`:
 
 ## No MongoDB at runtime
 
-`src/memory/conversation_memory.py` stores conversations in a plain `dict` in memory. The `mongodb.py` module exists but is unused. No MongoDB instance needed. State persistence is now handled by LangGraph's `MemorySaver` checkpointer (in-memory, same limitation — restart loses state).
+`lib/memory/conversation_memory.py` stores conversations in a plain `dict` in memory. The `mongodb.py` module exists but is unused. No MongoDB instance needed. State persistence is now handled by LangGraph's `MemorySaver` checkpointer (in-memory, same limitation — restart loses state).
 
 ## Tests
 
@@ -88,23 +92,120 @@ Mock tools return `Command(update=...)` to simulate the real tools' state emissi
 
 ## Data pipeline (order matters)
 
-1. **SQLite** (`knowledge_base/db/`) — hospitals, doctors, schedules, time_slots
-2. **Neo4j** (`knowledge_base/graph/`) — Doctor/Hospital/PracticesAt/SpecializesIn/Speaks nodes/edges
-3. **ChromaDB** (`knowledge_base/rag/`) — vector embeddings via `all-MiniLM-L6-v2`
+1. **SQLite** (`apps/kb/db/`) — hospitals, doctors, schedules, time_slots
+2. **Neo4j** (`apps/kb/graph/`) — Doctor/Hospital/PracticesAt/SpecializesIn/Speaks nodes/edges
+3. **ChromaDB** (`apps/kb/rag/`) — vector embeddings via `all-MiniLM-L6-v2`
 
 Expects `data/raw/` and `data/processed/` at project root. No sample data committed.
 
-`neo4j_schema.cypher` is a **reference file** — `Neo4jLoader.apply_schema()` runs a different (smaller) set of constraints.
+`neo4j_schema.cypher` is a **reference file** — `Neo4jEngine.apply_schema()` runs a different (smaller) set of constraints.
+
+### Ingestion from Excel
+
+`doctors_data_enriched.xlsx` at project root can be loaded into all three stores via:
+
+```cmd
+python ingest_doctors.py
+```
+
+This script reads the Excel file and upserts into:
+1. **SQLite** — hospitals + doctors tables (via SQLAlchemy ORM `Doctor`/`Hospital` models)
+2. **Neo4j** — clears existing graph, recreates schema, loads Doctor/Hospital/Specialization/Language nodes and edges
+3. **ChromaDB** — upserts doctor profile text chunks with embeddings
+
+The Excel columns map to the `Doctor` model fields. `tenant_id` in the Excel scopes which hospital branch each doctor belongs to. `location_id` is derived from `tenants.json` via `TENANT_META` in `lib/config.py`.
 
 ## Multi-tenant
 
-- `TENANT_META` in `config.py` maps 7 tenant IDs → location IDs (Gleneagles branches)
+Two distinct IDs, never interchangeable:
+
+- **tenant_id** — hospital **branch** (e.g. `glh-chn`); scopes KB search (Chroma/Neo4j filters) + branding. `TENANT_META` in `lib/config.py` maps 7 tenant IDs → location IDs
+- **client_id** — hospital **group** (e.g. `gleneagles_001`); scopes booking/workflow endpoints. `TENANT_CLIENTS` maps each branch → its client; `resolve_booking_client_id()` in `lib/config.py` must be applied before any workflow call (agent does this in `main.py` + `assistant_node`)
+
 - `TenantConfig` branding loaded from DB `hospitals` table at runtime via `get_tenant_config_from_db()`
 - Fallback to `Settings` fields for currency/names/booking URL
-- `client_id` is required by workflow endpoints — maps to `CLIENTS` dict in `workflows/config.py`
+- `client_id` is required by workflow endpoints — maps to `CLIENTS` dict in `apps/workflows/config.py` (hospital-group keys only, never branch ids)
 
 ## streamlit_app.py quirks
 
 - Uses **urllib** (sync), not httpx — all requests block the UI
 - MUST call `st.rerun()` after appending assistant message (already done — don't remove it)
 - Sidebar text inputs for all 3 service URLs with default `localhost:port` values
+
+## Test Agent (`tests/agent_scenarios/`)
+
+A standalone test agent system that simulates real user personas interacting with the agent's `/chat` API endpoint — the same endpoint the Streamlit UI uses. Completely separate from application code.
+
+### Structure
+
+```
+tests/agent_scenarios/
+├── __init__.py          # Public API exports
+├── personas.py          # User personas (Patient, Attender, ConfusedUser, ExistingPatient)
+├── scenarios.py         # Scenario definitions (multi-turn conversation sequences)
+├── runner.py            # Async ScenarioRunner that calls /chat API and validates responses
+└── run.py               # Standalone CLI runner for manual execution
+tests/test_agent_scenarios.py   # Pytest integration with all scenarios
+```
+
+### Personas
+
+| Persona | Role | Style |
+|---|---|---|
+| `PatientPersona` | Patient | First-person, casual, direct |
+| `AttenderPersona` | Caregiver/family | Third-person, formal |
+| `ConfusedUserPersona` | Unsure user | Vague, needs follow-up |
+| `ExistingPatientPersona` | Returning patient | References past appointments |
+
+### Scenarios (8 total)
+
+| Scenario | Flow |
+|---|---|
+| `search_and_book` | Search doctors → check availability → book with confirmation |
+| `check_availability` | Attender checks slots for a known doctor |
+| `cancel_appointment` | Existing patient cancels a booking |
+| `reschedule_appointment` | Reschedule to a new date/time |
+| `check_status_scenario` | Look up appointments by phone number |
+| `edge_case_no_results` | Search for a specialty with no matching doctors |
+| `booking_cancelled_at_confirmation` | Say "no" when asked to confirm a booking |
+| `confused_user` | Vague queries needing agent guidance |
+
+### Running the test agent
+
+```bash
+# Make sure the agent service is running on port 8002
+uvicorn apps.agent.main:app --reload --port 8002
+
+# Run as pytest (integration tests)
+pytest tests/test_agent_scenarios.py -v
+
+# Run the standalone CLI runner (shows detailed output)
+python -m tests.agent_scenarios.run http://localhost:8002
+
+# Or from project root:
+python -m tests.agent_scenarios.run
+```
+
+### How it works
+
+1. `ScenarioRunner` sends messages to the `/chat` endpoint (same as Streamlit) using `httpx.AsyncClient`
+2. Each `Turn` defines expected response content and whether a `pending_confirmation` status is expected
+3. When `pending_confirmation` is detected, the runner automatically sends "yes" or "no" on the next turn
+4. Responses are validated against `expected_in_response` keywords and `expected_not_in_response` exclusions
+5. `ScenarioResult` provides per-turn pass/fail with error details and timing
+
+### Adding new scenarios
+
+```python
+from tests.agent_scenarios import Scenario, _t
+
+my_scenario = Scenario(
+    name="my_scenario",
+    description="What this scenario tests",
+    persona="patient",  # or "attender", "confused", "existing_patient"
+    turns=[
+        _t("First user message", expected_contains=["keyword"]),
+        _t("Follow-up message", expect_pending_confirmation=True),
+    ],
+)
+```

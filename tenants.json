@@ -1,0 +1,72 @@
+{
+  "glh-chn": {
+    "client_id": "gleneagles_001",
+    "location_id": 80,
+    "brand_name": "Gleneagles HealthCity Chennai",
+    "brand_description": "a multi-specialty hospital in Chennai, Perumbakkam",
+    "loc_short": "chn",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "contact_phone": ""
+  },
+  "glh-adyar": {
+    "client_id": "gleneagles_001",
+    "location_id": 81,
+    "brand_name": "Gleneagles Adyar",
+    "brand_description": "a multi-specialty hospital in Chennai, Adyar",
+    "loc_short": "adyar",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "contact_phone": ""
+  },
+  "glh-kengeri": {
+    "client_id": "gleneagles_001",
+    "location_id": 82,
+    "brand_name": "Gleneagles Kengeri",
+    "brand_description": "a multi-specialty hospital in Bangalore, Kengeri",
+    "loc_short": "kengeri",
+    "city": "Bangalore",
+    "state": "Karnataka",
+    "contact_phone": ""
+  },
+  "glh-richmond": {
+    "client_id": "gleneagles_001",
+    "location_id": 83,
+    "brand_name": "Gleneagles Richmond Road",
+    "brand_description": "a multi-specialty hospital in Bangalore, Richmond Road",
+    "loc_short": "richmond",
+    "city": "Bangalore",
+    "state": "Karnataka",
+    "contact_phone": ""
+  },
+  "glh-parel": {
+    "client_id": "gleneagles_001",
+    "location_id": 84,
+    "brand_name": "Gleneagles Parel",
+    "brand_description": "a multi-specialty hospital in Mumbai, Parel",
+    "loc_short": "parel",
+    "city": "Mumbai",
+    "state": "Maharashtra",
+    "contact_phone": ""
+  },
+  "glh-lkp": {
+    "client_id": "gleneagles_001",
+    "location_id": 85,
+    "brand_name": "Gleneagles LKP",
+    "brand_description": "a multi-specialty hospital in Mumbai, LKP",
+    "loc_short": "lkp",
+    "city": "Mumbai",
+    "state": "Maharashtra",
+    "contact_phone": ""
+  },
+  "glh-lbn": {
+    "client_id": "gleneagles_001",
+    "location_id": 86,
+    "brand_name": "Gleneagles LBN",
+    "brand_description": "a multi-specialty hospital in Mumbai, LBN",
+    "loc_short": "lbn",
+    "city": "Mumbai",
+    "state": "Maharashtra",
+    "contact_phone": ""
+  }
+}
