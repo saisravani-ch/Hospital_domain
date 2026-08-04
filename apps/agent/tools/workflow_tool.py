@@ -26,7 +26,10 @@ async def _fetch_slots(doctor_id: str, d: str, client_id: str) -> list[dict] | N
         resp = await client.get(f"{WF_BASE}/appointments/availability", params=params)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("slots", [])
+        slots = data.get("slots", [])
+        for s in slots:
+            s["date"] = d  # so the LLM never mixes up days when a date range is aggregated
+        return slots
     except httpx.HTTPError:
         return None
 

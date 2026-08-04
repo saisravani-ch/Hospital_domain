@@ -855,10 +855,12 @@ input:focus {
    ═══════════════════════════════════════════════════════ */
 
 .dash {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     background: #0d1117;
     color: #e6edf3;
     padding: 1.5rem;
-    min-height: 100vh;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
