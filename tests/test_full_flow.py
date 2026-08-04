@@ -96,7 +96,7 @@ async def get_my_appointments(phone: str, runtime: ToolRuntime = None) -> Comman
 
 
 _SEARCH_MOCK_TOOLS = [search_doctors, get_doctor_info]
-_BOOKING_MOCK_TOOLS = [check_availability, book_appointment, reschedule_appointment, cancel_appointment, get_my_appointments]
+_BOOKING_MOCK_TOOLS = [check_availability, book_appointment, reschedule_appointment, cancel_appointment, get_my_appointments, search_doctors, get_doctor_info]
 
 
 class MockAssistant:
@@ -327,6 +327,49 @@ async def test_booking_cancelled_by_user():
     assert r2["current_phase"] == "booking_cancelled"
     msgs = r2.get("messages", [])
     assert any("else" in (m.content or "") for m in msgs)
+
+
+@pytest.mark.asyncio
+async def test_booking_search_then_availability():
+    """
+    booking_skill: user asks to book with a doctor by specialty (no named doctor).
+    Correct flow: search_doctors + check_availability per doctor (concurrent) ->
+    present list WITH next available slot -> user picks one -> show full slots
+    only on explicit request -> book. LLM must NOT auto-pick a doctor.
+    """
+    responses = [
+        # Turn 1: search + availability for each candidate, concurrently
+        AIMessage(content="", tool_calls=[
+            {"name": "search_doctors", "args": {"query": "heart doctor cardiology chennai"}, "id": "call_search", "type": "tool_call"},
+            {"name": "check_availability", "args": {"doctor_id": "dr-susan-george", "date": "2026-07-29"}, "id": "call_avail_susan", "type": "tool_call"},
+            {"name": "check_availability", "args": {"doctor_id": "dr-gobu-p", "date": "2026-07-29"}, "id": "call_avail_gobu", "type": "tool_call"},
+            {"name": "check_availability", "args": {"doctor_id": "dr-madhusudhan-m", "date": "2026-07-29"}, "id": "call_avail_madhu", "type": "tool_call"},
+        ]),
+        AIMessage(content="Here are the cardiologists with availability tomorrow:\n1) Dr Susan George - Cardiology, 30 yrs, Rs 500 - next slot 10:30\n2) Dr Gobu P - Cardiology, 20 yrs, Rs 400 - next slot 10:30\n3) Dr Madhusudhan M - Cardio Thoracic Surgery, 12 yrs, Rs 600 - next slot 10:30\nWhich doctor would you like to book?"),
+        # Turn 2: user picks a doctor
+        AIMessage(content="", tool_calls=[{"name": "check_availability", "args": {"doctor_id": "dr-susan-george", "date": "2026-07-29"}, "id": "call_avail_full", "type": "tool_call"}]),
+        AIMessage(content="Dr Susan George's full schedule tomorrow: 10:30, 11:00, 14:00. Please pick a time and share your phone number to book."),
+    ]
+    assistant = MockAssistant(responses)
+    graph = _build_test_graph(booking_router, booking_assistant=assistant)
+    state = _initial_state("flow_test_search_book")
+    state["current_phase"] = "idle"
+
+    config = {"configurable": {"thread_id": "flow_test_search_book"}}
+    # Turn 1: user asks for heart doctor booking -> search + availability run, list presented with next slots
+    r1 = await graph.ainvoke({**state, "messages": [HumanMessage(content="I want to book an appointment with a heart doctor in Chennai tomorrow")]}, config)
+    assert len(r1["search_results"]) == 3
+    assert r1["current_phase"] == "checking"
+    assert r1["selected_doctor_id"] is None
+    assert len(r1["available_slots"]) == 3  # one per concurrent check_availability (merged)
+    msgs = r1.get("messages", [])
+    assert any("Susan George" in (m.content or "") and "next slot" in (m.content or "").lower() for m in msgs)
+    assert any("which doctor" in (m.content or "").lower() for m in msgs)
+
+    # Turn 2: user asks specifically for the full schedule of the chosen doctor
+    r2 = await graph.ainvoke({"messages": [HumanMessage(content="I'll go with Dr Susan George, show me the full schedule for tomorrow")]}, config)
+    assert len(r2["available_slots"]) == 3
+    assert r2["current_phase"] == "checking"
 
 
 @pytest.mark.asyncio

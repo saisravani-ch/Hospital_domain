@@ -54,6 +54,11 @@ class ChatRequest(BaseModel):
     # client_id — hospital GROUP (e.g. "gleneagles_001"); scopes bookings.
     # A branch/tenant id is accepted here and mapped to its client.
     client_id: str | None = None
+    # patient_phone / patient_name — sender identity resolved from the
+    # WhatsApp account by the client. Seeded into state so the agent never
+    # has to ask for them.
+    patient_phone: str | None = None
+    patient_name: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -91,7 +96,8 @@ async def chat(req: ChatRequest) -> dict[str, Any]:
                     "selected_doctor_id": None,
                     "available_slots": [],
                     "selected_slot": None,
-                    "patient_phone": None,
+                    "patient_phone": req.patient_phone,
+                    "patient_name": req.patient_name,
                     "booking_result": None,
                     "current_phase": "idle",
                     "user_location": None,
@@ -99,10 +105,18 @@ async def chat(req: ChatRequest) -> dict[str, Any]:
                 config,
             )
         else:
-            result = await _graph.ainvoke(
-                {"messages": [HumanMessage(content=req.message)], "client_id": client_id, "tenant_id": req.tenant_id},
-                config,
-            )
+            update: dict[str, Any] = {
+                "messages": [HumanMessage(content=req.message)],
+                "client_id": client_id,
+                "tenant_id": req.tenant_id,
+            }
+            # Refresh the resolved identity on every turn so a phone change
+            # mid-conversation (e.g. re-randomized in the UI) takes effect.
+            if req.patient_phone is not None:
+                update["patient_phone"] = req.patient_phone
+            if req.patient_name is not None:
+                update["patient_name"] = req.patient_name
+            result = await _graph.ainvoke(update, config)
 
     snapshot = _graph.get_state(config)
     has_pending = bool(snapshot.next)

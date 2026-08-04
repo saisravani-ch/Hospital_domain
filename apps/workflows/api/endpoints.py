@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from apps.workflows.services.booking_service import AppointmentBookingService
+from apps.workflows.services.dashboard_service import DashboardService
 from apps.workflows.api.schemas import (
     GetAvailabilityRequest, GetAvailabilityResponse,
     BookAppointmentRequest, BookAppointmentResponse,
@@ -99,6 +100,19 @@ def list_appointments(
             client_id=client_id,
             phone=phone,
         )
+    except Exception as e:
+        handle_service_error(e, client_id)
+
+
+@router.get("/dashboard")
+def get_dashboard(client_id: str = Query(...)) -> dict:
+    """Monitoring dashboard payload for a receptionist / ops person.
+
+    Aggregates today's + upcoming appointments, status rollups, doctor
+    availability and network analytics from the shared knowledge base.
+    """
+    try:
+        return DashboardService(client_id).build()
     except Exception as e:
         handle_service_error(e, client_id)
 

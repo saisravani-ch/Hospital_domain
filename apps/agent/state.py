@@ -20,6 +20,7 @@ class HospitalAgentState(TypedDict):
     available_slots: list[dict]
     selected_slot: dict | None
     patient_phone: str | None
+    patient_name: str | None
     booking_result: dict | None
 
     current_phase: str

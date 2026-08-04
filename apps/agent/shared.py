@@ -93,4 +93,10 @@ def build_system(state: HospitalAgentState, prompt_template: str) -> str:
     cid = state.get("client_id")
     if cid:
         system += f"\n\nClient/hospital ID for booking: {cid}"
+    phone = state.get("patient_phone")
+    if phone:
+        system += f"\n\nPatient phone (resolved from their WhatsApp account): {phone}"
+    name = state.get("patient_name")
+    if name:
+        system += f"\nPatient name (resolved from their WhatsApp account): {name}"
     return system

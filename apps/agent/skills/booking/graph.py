@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 
@@ -29,6 +29,10 @@ _CLIENT_ID_TOOLS = {
     if t.args_schema and "client_id" in (t.args_schema.model_fields or {})
 }
 
+# Tools that need patient_phone — injected from state (resolved WhatsApp
+# identity) so the agent never asks the user for it.
+_PHONE_TOOLS = {"book_appointment", "get_my_appointments"}
+
 
 @lru_cache(1)
 def _build_llm_cached():
@@ -41,12 +45,23 @@ async def assistant_node(state: HospitalAgentState) -> dict[str, Any]:
     messages = [system] + list(state["messages"])
     response = await llm.ainvoke(messages)
     cid = resolve_booking_client_id(state.get("tenant_id"), state.get("client_id"))
-    if isinstance(response, AIMessage) and isinstance(response.tool_calls, list) and cid:
+    phone = state.get("patient_phone")
+    if isinstance(response, AIMessage) and isinstance(response.tool_calls, list) and (cid or phone):
         patched_calls = []
         for tc in response.tool_calls:
             args = tc.get("args") or {}
-            if tc.get("name") in _CLIENT_ID_TOOLS and "client_id" not in args:
+            changed = False
+            if tc.get("name") in _CLIENT_ID_TOOLS and cid and "client_id" not in args:
                 args = {**args, "client_id": cid}
+                changed = True
+            if (
+                tc.get("name") in _PHONE_TOOLS
+                and phone
+                and not (args.get("patient_phone") or "").strip()
+            ):
+                args = {**args, "patient_phone": phone}
+                changed = True
+            if changed:
                 tc = {**tc, "args": args}
             patched_calls.append(tc)
         response = AIMessage(
@@ -76,7 +91,22 @@ def human_confirmation_node(state: HospitalAgentState) -> dict[str, Any]:
                     confirmation = interrupt(msg_text)
                     if confirmation and str(confirmation).strip().lower()[:1] == "y":
                         return {"current_phase": "booking_confirmed"}
-                    return {"current_phase": "booking_cancelled"}
+                    # Cancelled: the book_appointment tool never ran, so there is
+                    # no ToolMessage for this tool_call. Append one so the LLM never
+                    # sees a dangling tool_call (Azure OpenAI rejects those with 400).
+                    return {
+                        "current_phase": "booking_cancelled",
+                        "messages": [
+                            ToolMessage(
+                                content=(
+                                    "The user declined to confirm this appointment, so it was NOT booked. "
+                                    "Politely acknowledge the cancellation and ask if you can help with anything else. "
+                                    "Do not attempt to book again."
+                                ),
+                                tool_call_id=tc.get("id"),
+                            )
+                        ],
+                    }
     return {}
 
 
