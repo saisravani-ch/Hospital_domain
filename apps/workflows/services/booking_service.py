@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -152,7 +152,7 @@ class AppointmentBookingService:
             )
 
             self.db.execute(
-                text("UPDATE appointments SET slot_id = :new_slot, date = :date, time = :time WHERE id = :id"),
+                text("UPDATE appointments SET slot_id = :new_slot, date = :date, time = :time, status = 'rescheduled' WHERE id = :id"),
                 {"new_slot": new_slot[0], "date": new_date, "time": new_time, "id": appointment_id}
             )
             self.db.commit()
@@ -206,5 +206,50 @@ class AppointmentBookingService:
         except Exception as e:
             self.db.rollback()
             raise
+        finally:
+            self.db.close()
+
+    def check_in(self, appointment_id: str) -> dict:
+        try:
+            appointment = self.db.execute(
+                text("SELECT status FROM appointments WHERE id = :id AND client_id = :cid"),
+                {"id": appointment_id, "cid": self.client_id},
+            ).fetchone()
+            if not appointment:
+                raise ValueError("Appointment not found")
+            if appointment[0] == "cancelled":
+                raise ValueError("Cannot check in a cancelled appointment")
+
+            self.db.execute(
+                text("UPDATE appointments SET status = 'checked_in' WHERE id = :id"),
+                {"id": appointment_id},
+            )
+            self.db.commit()
+            return {
+                "appointment_id": appointment_id,
+                "status": "checked_in",
+                "client_id": self.client_id,
+                "checked_in_at": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            self.db.rollback()
+            raise
+        finally:
+            self.db.close()
+
+    def get_upcoming_slots(self, doctor_id: str, days: int = 14) -> list[dict]:
+        try:
+            today = datetime.now(timezone.utc).date().isoformat()
+            max_date = (datetime.now(timezone.utc).date() + timedelta(days=days)).isoformat()
+            rows = self.db.execute(
+                text("""
+                    SELECT id, date, time FROM time_slots
+                    WHERE doctor_id = :did AND available = 1
+                          AND date >= :min AND date <= :max
+                    ORDER BY date, time
+                """),
+                {"did": doctor_id, "min": today, "max": max_date},
+            ).fetchall()
+            return [{"slot_id": r[0], "date": r[1], "time": r[2]} for r in rows]
         finally:
             self.db.close()

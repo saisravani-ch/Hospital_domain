@@ -21,22 +21,38 @@ async def get_doctor(
     doctor_id: str,
     graph: Neo4jQueryEngine = Depends(get_graph_engine),
 ):
-    """Full semantic context for a doctor (specializations, hospitals, languages)."""
-    doc = await graph.get_doctor_context(doctor_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Doctor '{doctor_id}' not found")
+    """Full semantic context for a doctor (specializations, hospitals, languages).
+    Falls back to the SQLite record if the Neo4j lookup fails, so a graph hiccup
+    never surfaces as a 500 to the agent/UI."""
+    try:
+        doc = await graph.get_doctor_context(doctor_id)
+    except Exception:
+        doc = None
 
-    # Supplement transactional data from SQLite (not stored in Neo4j)
+    # Transactional data from SQLite (fees are not stored in Neo4j; also the fallback profile)
     session = get_session()
     try:
         row = session.execute(
-            text("SELECT consultation_fee FROM doctors WHERE id = :did"),
+            text("SELECT name, speciality, consultation_fee FROM doctors WHERE id = :did"),
             {"did": doctor_id},
         ).fetchone()
-        if row and row[0] is not None:
-            doc["consultation_fee"] = row[0]
     finally:
         session.close()
+
+    if not doc and not row:
+        raise HTTPException(status_code=404, detail=f"Doctor '{doctor_id}' not found")
+
+    if doc is None:
+        doc = {
+            "sql_id": doctor_id,
+            "name": row[0],
+            "specializations": [row[1]] if row[1] else [],
+            "hospitals": [],
+            "languages": [],
+            "source": "sqlite-fallback",
+        }
+    if row and row[2] is not None:
+        doc["consultation_fee"] = row[2]
 
     return doc
 

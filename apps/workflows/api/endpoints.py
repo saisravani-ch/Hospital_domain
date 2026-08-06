@@ -6,6 +6,8 @@ from apps.workflows.api.schemas import (
     BookAppointmentRequest, BookAppointmentResponse,
     RescheduleAppointmentRequest, RescheduleAppointmentResponse,
     CancelAppointmentRequest, CancelAppointmentResponse,
+    CheckInAppointmentRequest, CheckInAppointmentResponse,
+    UpcomingSlot, UpcomingSlotsResponse,
     ListAppointmentsResponse, AppointmentInfo,
     AvailableSlot
 )
@@ -99,6 +101,35 @@ def list_appointments(
             appointments=[AppointmentInfo(**a) for a in appointments],
             client_id=client_id,
             phone=phone,
+        )
+    except Exception as e:
+        handle_service_error(e, client_id)
+
+
+@router.post("/check-in", response_model=CheckInAppointmentResponse)
+def check_in_appointment(req: CheckInAppointmentRequest) -> CheckInAppointmentResponse:
+    """Receptionist check-in — marks the appointment as checked_in."""
+    try:
+        service = get_booking_service(req.client_id)
+        result = service.check_in(req.appointment_id)
+        return CheckInAppointmentResponse(**result)
+    except Exception as e:
+        handle_service_error(e, req.client_id)
+
+
+@router.get("/upcoming-slots", response_model=UpcomingSlotsResponse)
+def get_upcoming_slots(
+    client_id: str = Query(...),
+    doctor_id: str = Query(...),
+) -> UpcomingSlotsResponse:
+    """Available slots for a doctor over the next 14 days (reschedule picker)."""
+    try:
+        service = get_booking_service(client_id)
+        slots = service.get_upcoming_slots(doctor_id)
+        return UpcomingSlotsResponse(
+            doctor_id=doctor_id,
+            client_id=client_id,
+            slots=[UpcomingSlot(**slot) for slot in slots],
         )
     except Exception as e:
         handle_service_error(e, client_id)

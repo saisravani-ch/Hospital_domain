@@ -79,3 +79,26 @@ export function cancelAppointment({ appointment_id, client_id }) {
         }),
     })
 }
+
+/** Receptionist check-in — POST /appointments/check-in. */
+export function checkInAppointment({ appointment_id, client_id }) {
+    const cfg = getConfig()
+    return request(`${base()}/appointments/check-in`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            appointment_id,
+            client_id: client_id || cfg.clientId,
+        }),
+    })
+}
+
+/** Available slots for a doctor over the next 14 days — GET /appointments/upcoming-slots. */
+export function getUpcomingSlots(doctorId, clientId) {
+    const cfg = getConfig()
+    const params = new URLSearchParams({
+        doctor_id: doctorId,
+        client_id: clientId || cfg.clientId,
+    })
+    return request(`${base()}/appointments/upcoming-slots?${params}`)
+}

@@ -8,9 +8,6 @@ import ChatInputBox from './components/ChatInputBox'
 import Search from './components/Search'
 import Welcome from './components/Welcome'
 import TopNav from './components/TopNav'
-import DoctorsView from './components/doctors/DoctorsView'
-import AppointmentsView from './components/appointments/AppointmentsView'
-import HealthView from './components/health/HealthView'
 import DashboardView from './components/dashboard/DashboardView'
 import ResolveByPhone from './components/ResolveByPhone'
 import { sendAgentMessage } from './api/agents'
@@ -287,9 +284,6 @@ function App() {
                 </div>
             )}
 
-            {activeView === 'doctors' && <DoctorsView config={config} />}
-            {activeView === 'appointments' && <AppointmentsView config={config} />}
-            {activeView === 'health' && <HealthView config={config} />}
             {activeView === 'dashboard' && <DashboardView config={config} />}
         </div>
     )

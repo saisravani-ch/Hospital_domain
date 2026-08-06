@@ -119,6 +119,25 @@ def populate(days=14, db_path=DB_PATH, fees_only=False):
     counts["slots_created"] = total_slots
     print(f"\n  Schedule days: {day_count}, Time slots: {total_slots}")
 
+    # ── Step 3: Refresh denormalized doctor summary columns ────────────────
+    # Dashboard + workflow dashboard service read doctors.total_available_slots /
+    # doctors.next_available. These were never recomputed after regeneration,
+    # leaving every doctor at 0 slots / NULL next_available.
+    cur.execute("""
+        UPDATE doctors SET
+            total_available_slots = COALESCE((
+                SELECT SUM(available_slots) FROM schedule_days
+                WHERE doctor_id = doctors.id AND available_slots > 0
+            ), 0),
+            next_available = (
+                SELECT MIN(date) FROM schedule_days
+                WHERE doctor_id = doctors.id AND available_slots > 0
+            )
+    """)
+    conn.commit()
+    counts["summary_updated"] = cur.rowcount
+    print(f"  Summary: {cur.rowcount} doctors refreshed (total_available_slots, next_available)")
+
     conn.close()
     return counts
 

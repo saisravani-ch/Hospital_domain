@@ -97,7 +97,8 @@ async def book_appointment(
     runtime: ToolRuntime = None,
 ) -> Command:
     """Book an appointment with a doctor at a specific date and time.
-    The client_id is automatically determined from your session if not provided."""
+    The client_id is automatically determined from your session if not provided.
+    If the patient mentioned their problem, symptoms, or reason for the visit, pass it in the 'notes' parameter (e.g. "chest pain", "fever for 3 days")."""
     cid = client_id or (_state or {}).get("client_id")
     if not cid:
         return Command(update={"messages": [ToolMessage(content='{"error": "Client ID not set."}', tool_call_id=runtime.tool_call_id if runtime else "")]})

@@ -426,6 +426,11 @@ input:focus {
     padding: 1.5rem 2rem;
 }
 
+.modal .tool-view {
+    background: transparent;
+    padding: 0;
+}
+
 .tool-view-header {
     display: flex;
     align-items: center;

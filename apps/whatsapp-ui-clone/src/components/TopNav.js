@@ -1,11 +1,9 @@
 import React, { useState } from 'react'
 import { faker } from '@faker-js/faker'
+import HealthView from './health/HealthView'
 
 const TABS = [
     { key: 'chat', label: '💬 Chat' },
-    { key: 'doctors', label: '🔍 Doctors' },
-    { key: 'appointments', label: '📅 Appointments' },
-    { key: 'health', label: '❤️ Health' },
     { key: 'dashboard', label: '📊 Dashboard' },
 ]
 
@@ -167,6 +165,10 @@ export default function TopNav({ active, onChange, config, onSaveConfig, contact
                                 placeholder="e.g. Priya Sharma"
                             />
                         </label>
+
+                        <hr style={{ margin: '1rem 0', borderColor: '#30363d' }} />
+                        <h4 style={{ marginBottom: '0.75rem' }}>❤️ Server Health</h4>
+                        <HealthView />
 
                         <div className="modal-actions">
                             <button className="btn" onClick={save}>

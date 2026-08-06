@@ -182,3 +182,7 @@ yarn-error.log*
 # ── Docker ──────────────────────────────────────────────────
 .dockerignore
 docker-compose.override.yml
+
+# SQLite WAL/SHM transient files
+*.db-shm
+*.db-wal

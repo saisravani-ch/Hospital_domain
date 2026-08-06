@@ -109,6 +109,7 @@ class Neo4jQueryEngine:
             result = await session.run(
                 """
                 MATCH (d:Doctor {id: $id})
+                WITH d LIMIT 1
                 OPTIONAL MATCH (d)-[:SPECIALIZES_IN]->(s:Specialization)
                 OPTIONAL MATCH (d)-[:PRACTICES_AT]->(h:Hospital)
                 OPTIONAL MATCH (d)-[:SPEAKS]->(l:Language)

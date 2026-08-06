@@ -29,6 +29,30 @@ class CancelAppointmentRequest(BaseModel):
     appointment_id: str
 
 
+class CheckInAppointmentRequest(BaseModel):
+    client_id: str
+    appointment_id: str
+
+
+class CheckInAppointmentResponse(BaseModel):
+    appointment_id: str
+    status: str
+    client_id: str
+    checked_in_at: str
+
+
+class UpcomingSlot(BaseModel):
+    slot_id: int
+    date: str
+    time: str
+
+
+class UpcomingSlotsResponse(BaseModel):
+    doctor_id: str
+    client_id: str
+    slots: List[UpcomingSlot]
+
+
 class AvailableSlot(BaseModel):
     slot_id: int
     time: str
