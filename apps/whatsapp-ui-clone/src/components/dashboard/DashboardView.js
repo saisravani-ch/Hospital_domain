@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { getDashboard } from '../../api/dashboard'
 import {
     checkInAppointment,
@@ -17,7 +17,9 @@ import {
     Activity, Calendar, Clock, Stethoscope, MapPin, TrendingUp,
     AlertTriangle, Info, RefreshCw, UserCheck, UserX, Sparkles,
     Building2, Languages, Award, Search, LayoutDashboard,
-    ExternalLink, Filter, Users, Layers, ShieldCheck, X, ClipboardList
+    ExternalLink, Filter, Users, Layers, ShieldCheck, X, ClipboardList,
+    Phone, Bell, MessageSquare, CheckCircle2, Ban, Pencil,
+    DoorClosed, ChevronRight, RotateCcw, Eye
 } from 'lucide-react'
 import { doctorAvatar } from './genderAvatar'
 
@@ -142,7 +144,7 @@ export default function DashboardView({ config }) {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
     const [activeTab, setActiveTab] = useState('overview') // 'overview' | 'hospitals' | 'doctors' | 'analytics' | 'ops'
-    const [role, setRole] = useState('receptionist') // 'receptionist' | 'attender' | 'analytics'
+    const [role, setRole] = useState('attender') // 'attender' | 'receptionist' | 'analytics'
     
     // Directory Filters State
     const [searchQuery, setSearchQuery] = useState('')
@@ -274,19 +276,19 @@ export default function DashboardView({ config }) {
                 </div>
             )}
 
-            {/* Role Switcher — Receptionist / Attender / Analytics */}
+            {/* Role Switcher — Attender / Receptionist / Analytics */}
             <div className="dash-role-switcher">
-                <button
-                    className={`dash-role-btn ${role === 'receptionist' ? 'active' : ''}`}
-                    onClick={() => setRole('receptionist')}
-                >
-                    <ClipboardList size={16} /> Receptionist
-                </button>
                 <button
                     className={`dash-role-btn ${role === 'attender' ? 'active' : ''}`}
                     onClick={() => setRole('attender')}
                 >
                     <UserCheck size={16} /> Attender
+                </button>
+                <button
+                    className={`dash-role-btn ${role === 'receptionist' ? 'active' : ''}`}
+                    onClick={() => setRole('receptionist')}
+                >
+                    <ClipboardList size={16} /> Receptionist
                 </button>
                 <button
                     className={`dash-role-btn ${role === 'analytics' ? 'active' : ''}`}
@@ -304,20 +306,14 @@ export default function DashboardView({ config }) {
                 </div>
             )}
 
+            {/* ═══════════════ ATTENDER ROLE ═══════════════ */}
+            {role === 'attender' && data && (
+                <AttenderView data={data} clientId={clientId} onChanged={load} />
+            )}
+
             {/* ═══════════════ RECEPTIONIST ROLE ═══════════════ */}
             {role === 'receptionist' && data && (
                 <ReceptionistView data={data} clientId={clientId} onChanged={load} />
-            )}
-
-            {/* ═══════════════ ATTENDER ROLE (coming next) ═══════════════ */}
-            {role === 'attender' && data && (
-                <div className="dash-empty-msg" style={{ padding: '3rem 1rem' }}>
-                    <UserCheck size={28} style={{ marginBottom: '0.6rem', color: '#3fb950' }} />
-                    <div style={{ fontWeight: 700, color: '#e6edf3', marginBottom: '0.35rem' }}>
-                        Attender View
-                    </div>
-                    <div>Provide the attender requirements and this view will be built here.</div>
-                </div>
             )}
 
             {/* ═══════════════ ANALYTICS ROLE (original dashboard) ═══════════════ */}
@@ -843,30 +839,113 @@ export default function DashboardView({ config }) {
     )
 }
 
-/* ══════════════════════════ RECEPTIONIST VIEW ══════════════════════════ */
+/* ══════════════════════════ OPERATIONAL SHARED ══════════════════════════ */
 
-function RecKpi({ label, value, color }) {
+// Compact operational stat card (small, non-analytics)
+function OpsCard({ label, value, tone, icon, hint }) {
     return (
-        <div className={`rec-kpi ${color}`}>
-            <div className="rec-kpi-label">{label}</div>
-            <div className="rec-kpi-value">{fmt(value)}</div>
+        <div className={`ops-card ${tone || ''}`}>
+            <div className="ops-card-top">
+                <span className="ops-card-icon">{icon}</span>
+                <span className="ops-card-label">{label}</span>
+            </div>
+            <div className="ops-card-value">{fmt(value)}</div>
+            {hint && <div className="ops-card-hint">{hint}</div>}
         </div>
     )
 }
 
+function QuickAction({ icon, label, onClick, href, tone }) {
+    const cls = `ops-quick-btn ${tone || ''}`
+    if (href) {
+        return (
+            <a className={cls} href={href} target="_blank" rel="noreferrer">
+                {icon}<span>{label}</span>
+            </a>
+        )
+    }
+    return (
+        <button className={cls} onClick={onClick}>
+            {icon}<span>{label}</span>
+        </button>
+    )
+}
+
+// Small colored status dot + label
+function StatusDot({ tone, label }) {
+    return (
+        <span className={`ops-dot-wrap ${tone}`}>
+            <span className="ops-dot" />
+            {label}
+        </span>
+    )
+}
+
+// Map a booking source string to a compact source pill
+function sourcePill(a) {
+    const raw = (a.booked_through || '').toLowerCase()
+    if (raw.includes('whats')) return { cls: 'green', label: 'WhatsApp' }
+    if (raw.includes('walk')) return { cls: 'purple', label: 'Walk-in' }
+    if (raw.includes('recep') || raw.includes('desk')) return { cls: 'blue', label: 'Reception' }
+    return { cls: 'muted', label: a.booked_through || 'Reception' }
+}
+
+// Deterministic room number for a doctor (stable across refreshes, no backend)
+function roomForDoctor(doc) {
+    const key = String(doc.doctor_id || doc.id || doc.doctor_name || doc.name || '')
+    let h = 0
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) & 0xffff
+    const floor = (h % 4) + 1          // floors 1–4
+    const room = (h % 30) + 1          // rooms 1–30
+    return `${floor}${String(room).padStart(2, '0')}`
+}
+
+// Minutes elapsed since a HH:MM scheduled time today (clamped ≥ 0)
+function minsSinceTime(t) {
+    if (!t) return 0
+    try {
+        const [h, m] = String(t).split(':').map(Number)
+        const now = new Date()
+        const then = new Date()
+        then.setHours(h, m || 0, 0, 0)
+        const diff = Math.round((now - then) / 60000)
+        return diff > 0 ? diff : 0
+    } catch (e) {
+        return 0
+    }
+}
+
+function fmtWait(mins) {
+    if (mins <= 0) return 'just now'
+    if (mins < 60) return `${mins} min`
+    const h = Math.floor(mins / 60)
+    const m = mins % 60
+    return m ? `${h}h ${m}m` : `${h}h`
+}
+
+function waitTone(mins) {
+    if (mins >= 45) return 'red'
+    if (mins >= 20) return 'orange'
+    return 'green'
+}
+
+/* ══════════════════════════ RECEPTIONIST VIEW ══════════════════════════ */
+
 function ReceptionistView({ data, clientId, onChanged }) {
     const [opsDate, setOpsDate] = useState(data.ops_date || data.today || '')
     const [query, setQuery] = useState('')
+    const [statusFilter, setStatusFilter] = useState('all')
     const [selectedId, setSelectedId] = useState(null)
     const [busy, setBusy] = useState('')
     const [notice, setNotice] = useState('')
+    const searchRef = useRef(null)
 
     const all = data.recent_appointments || []
     const opsDates = (data.ops_dates && data.ops_dates.length) ? data.ops_dates : [opsDate]
     const day = useMemo(() => all.filter((a) => a.date === opsDate), [all, opsDate])
+    const doctors = data.doctor_availability || []
 
-    // Search across appointment id, patient name, and phone. When a query is
-    // present we search the full history, not just the selected day.
+    // Table rows: search spans full history; otherwise the selected day + status filter
     const rows = useMemo(() => {
         const q = query.trim().toLowerCase()
         const source = q ? all : day
@@ -877,18 +956,54 @@ function ReceptionistView({ data, clientId, onChanged }) {
                 (a.patient_name || '').toLowerCase().includes(q) ||
                 String(a.patient_phone || '').includes(q)
             )
-            .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (a.time || '').localeCompare(b.time || ''))
-    }, [all, day, query])
+            .filter((a) => statusFilter === 'all' || a.status === statusFilter)
+            .sort((a, b) =>
+                q
+                    ? (b.date || '').localeCompare(a.date || '') || (a.time || '').localeCompare(b.time || '')
+                    : (a.time || '').localeCompare(b.time || '')
+            )
+    }, [all, day, query, statusFilter])
 
     const count = (status) => day.filter((a) => a.status === status).length
-    const kpis = [
-        { label: "Today's Appointments",   value: day.length,                                                         color: 'blue' },
-        { label: 'Checked-In Patients',    value: count('checked_in'),                                                color: 'green' },
-        { label: 'Upcoming Appointments',  value: all.filter((a) => a.date > opsDate && a.status === 'booked').length, color: 'purple' },
-        { label: 'Cancelled Appointments', value: count('cancelled'),                                                 color: 'red' },
-        { label: 'Doctors Available',      value: (data.doctor_availability || []).length,                            color: 'green' },
-        { label: 'Pending Requests',       value: all.filter((a) => a.status === 'pending').length,                   color: 'amber' },
+    const waitingCheckIn = day.filter((a) => a.status === 'booked' || a.status === 'rescheduled').length
+    const pending = all.filter((a) => a.status === 'pending').length
+
+    const cards = [
+        { label: "Today's Appointments", value: day.length,          tone: 'blue',   icon: <Calendar size={16} /> },
+        { label: 'Waiting for Check-In', value: waitingCheckIn,      tone: 'orange', icon: <Clock size={16} /> },
+        { label: 'Doctors Available',    value: doctors.length,      tone: 'green',  icon: <Stethoscope size={16} /> },
+        { label: 'Pending Requests',     value: pending,             tone: 'amber',  icon: <Bell size={16} /> },
     ]
+
+    // Compact notifications derived from live data (no backend feed required)
+    const notifications = useMemo(() => {
+        const out = []
+        if (waitingCheckIn > 0)
+            out.push({ tone: 'orange', icon: <Clock size={14} />, text: `${waitingCheckIn} patient${waitingCheckIn > 1 ? 's' : ''} waiting to check in` })
+        if (pending > 0)
+            out.push({ tone: 'amber', icon: <Bell size={14} />, text: `${pending} pending request${pending > 1 ? 's' : ''} need review` })
+        const full = doctors.filter((d) => (d.open_slots ?? 0) === 0)
+        if (full.length)
+            out.push({ tone: 'red', icon: <UserX size={14} />, text: `${full.length} doctor${full.length > 1 ? 's' : ''} fully booked` })
+        if (count('cancelled') > 0)
+            out.push({ tone: 'red', icon: <Ban size={14} />, text: `${count('cancelled')} cancelled appointment${count('cancelled') > 1 ? 's' : ''} today` })
+        out.push({ tone: 'green', icon: <CheckCircle2 size={14} />, text: 'Schedule synced · reminders sent' })
+        return out
+    }, [waitingCheckIn, pending, doctors, day])
+
+    // Compact AI insight (single most useful line + a couple of secondary)
+    const aiInsights = useMemo(() => {
+        const tips = []
+        const busiest = [...doctors].sort((a, b) => (a.open_slots ?? 0) - (b.open_slots ?? 0))[0]
+        if (busiest && (busiest.open_slots ?? 0) <= 1)
+            tips.push(`${busiest.doctor_name} is nearly fully booked — consider redirecting walk-ins.`)
+        if (waitingCheckIn >= 5)
+            tips.push(`${waitingCheckIn} patients still to check in — front desk may get busy soon.`)
+        const wa = day.filter((a) => (a.booked_through || '').toLowerCase().includes('whats')).length
+        if (wa > 0) tips.push(`${wa} of today's bookings came via WhatsApp.`)
+        if (!tips.length) tips.push('Everything is on track. No bottlenecks detected right now.')
+        return tips.slice(0, 3)
+    }, [doctors, waitingCheckIn, day])
 
     const runAction = async (action, successMsg, busyMsg) => {
         setBusy(busyMsg)
@@ -904,132 +1019,191 @@ function ReceptionistView({ data, clientId, onChanged }) {
         }
     }
 
+    const quickCheckIn = (a) =>
+        runAction(
+            () => checkInAppointment({ appointment_id: a.appointment_id, client_id: clientId }),
+            `${patientLabel(a)} checked in ✅`,
+            'Checking in…'
+        )
+    const quickCancel = (a) =>
+        runAction(
+            () => cancelAppointment({ appointment_id: a.appointment_id, client_id: clientId }),
+            `Appointment for ${patientLabel(a)} cancelled`,
+            'Cancelling…'
+        )
+
     const selected = all.find((a) => a.appointment_id === selectedId) || null
-    const doctors = data.all_doctors && data.all_doctors.length ? data.all_doctors : (data.doctor_availability || [])
 
     return (
-        <div className="rec-view">
-            {/* KPI Row — matches operational snapshot */}
-            <div className="rec-kpi-grid">
-                {kpis.map((k) => (
-                    <RecKpi key={k.label} label={k.label} value={k.value} color={k.color} />
-                ))}
+        <div className="ops-view">
+            {/* Top compact cards */}
+            <div className="ops-cards-row">
+                {cards.map((c) => <OpsCard key={c.label} {...c} />)}
             </div>
 
             {notice && (
-                <div className="dash-alert-item info" style={{ marginBottom: '0.9rem' }}>
-                    <Info size={16} />
-                    <span>{notice}</span>
+                <div className="dash-alert-item info ops-notice">
+                    <Info size={16} /><span>{notice}</span>
+                    <button className="ops-notice-x" onClick={() => setNotice('')}><X size={13} /></button>
                 </div>
             )}
 
-            {/* Search + date controls */}
-            <div className="rec-controls">
-                <div className="rec-search-wrap">
-                    <Search size={15} className="rec-search-icon" />
-                    <input
-                        type="text"
-                        className="rec-search"
-                        placeholder="Search by appointment ID, patient name, or phone number…"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                    />
-                    {query && (
-                        <button className="rec-search-clear" onClick={() => setQuery('')} aria-label="Clear search">
-                            <X size={14} />
-                        </button>
-                    )}
-                </div>
-                <div className="rec-date-group">
-                    <label className="rec-date-label">Ops date</label>
-                    <select
-                        className="dir-select"
-                        value={opsDate}
-                        onChange={(e) => { setOpsDate(e.target.value); setSelectedId(null) }}
-                    >
-                        {opsDates.map((d) => (
-                            <option key={d} value={d}>{fmtDate(d)}</option>
-                        ))}
-                    </select>
-                </div>
-            </div>
-
-            {/* Appointments */}
-            <div className="dash-section-label">
-                📅 {query.trim() ? `Search Results (${rows.length})` : `Appointments · ${fmtDate(opsDate)} (${rows.length})`}
-            </div>
-            {rows.length === 0 ? (
-                <div className="dash-empty-msg">
-                    No appointments found{query.trim() ? ` matching “${query.trim()}”` : ' for this date'}.
-                </div>
-            ) : (
-                <div className="rec-appt-grid">
-                    {rows.slice(0, 60).map((a) => (
-                        <button
-                            key={a.appointment_id}
-                            className="rec-appt-card"
-                            onClick={() => setSelectedId(a.appointment_id)}
-                        >
-                            <div className="rec-appt-top">
-                                <span className="rec-appt-time">{fmtClock(a.time)}</span>
-                                <StatusPill status={a.status} />
-                            </div>
-                            <div className="rec-appt-patient">{patientLabel(a)}</div>
-                            <div className="rec-appt-doc">
-                                <Stethoscope size={13} /> {a.doctor_name}
-                                <span className="rec-appt-spec"> · {a.speciality}</span>
-                            </div>
-                            <div className="rec-appt-foot">
-                                <span className="rec-appt-id">#{a.appointment_id}</span>
-                                <span className="rec-appt-view">View details →</span>
-                            </div>
-                        </button>
-                    ))}
-                </div>
-            )}
-
-            {/* Doctor profiles */}
-            <div className="dash-section-label" style={{ marginTop: '1.5rem' }}>
-                🩺 Doctor Profiles ({doctors.length})
-            </div>
-            <div className="rec-doc-grid">
-                {doctors.slice(0, 60).map((d) => {
-                    const name = d.name || d.doctor_name || 'Unknown'
-                    const av = doctorAvatar(name)
-                    const slots = d.open_slots ?? d.total_available_slots ?? 0
-                    return (
-                        <div key={d.id || d.doctor_id || name} className="rec-doc-card">
-                            <div className="rec-doc-head">
-                                <div className="rec-doc-avatar" style={{ borderColor: av.color }}>
-                                    <span className="rec-doc-emoji">{av.emoji}</span>
-                                </div>
-                                <div className="rec-doc-meta">
-                                    <div className="rec-doc-name" title={name}>{name}</div>
-                                    <div className="rec-doc-dept">{d.speciality || 'General'}</div>
-                                </div>
-                            </div>
-                            {d.designation && (
-                                <div className="rec-doc-line">🎓 {d.designation}</div>
-                            )}
-                            <div className="rec-doc-badges">
-                                {slots > 0
-                                    ? <span className="dash-pill green">🟢 {slots} slots</span>
-                                    : <span className="dash-pill muted">🔴 No slots</span>}
-                                {d.city && <span className="dash-pill blue">📍 {d.city}</span>}
-                            </div>
-                            {d.booking_url ? (
-                                <a className="rec-doc-book" href={d.booking_url} target="_blank" rel="noreferrer">
-                                    📅 Book Appointment <ExternalLink size={12} />
-                                </a>
-                            ) : (
-                                <span className="rec-doc-book disabled">📅 Book Appointment</span>
+            {/* Main split: table (≈70%) + sidebar */}
+            <div className="ops-split">
+                {/* ── Appointment table ── */}
+                <div className="ops-main">
+                    <div className="ops-toolbar">
+                        <div className="ops-search-wrap">
+                            <Search size={15} className="ops-search-icon" />
+                            <input
+                                ref={searchRef}
+                                type="text"
+                                className="ops-search"
+                                placeholder="Search appointment ID, patient name, or phone…"
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                            />
+                            {query && (
+                                <button className="ops-search-clear" onClick={() => setQuery('')} aria-label="Clear">
+                                    <X size={14} />
+                                </button>
                             )}
                         </div>
-                    )
-                })}
+                        <select className="ops-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                            <option value="all">All statuses</option>
+                            <option value="booked">Booked</option>
+                            <option value="checked_in">Checked In</option>
+                            <option value="completed">Completed</option>
+                            <option value="cancelled">Cancelled</option>
+                            <option value="rescheduled">Rescheduled</option>
+                        </select>
+                        <select className="ops-select" value={opsDate} onChange={(e) => { setOpsDate(e.target.value); setSelectedId(null) }}>
+                            {opsDates.map((d) => <option key={d} value={d}>{fmtDate(d)}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="ops-table-scroll">
+                        <table className="ops-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Patient</th>
+                                    <th>Doctor</th>
+                                    <th>Department</th>
+                                    <th>Status</th>
+                                    <th>Source</th>
+                                    <th className="ops-actions-col">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.length === 0 ? (
+                                    <tr><td colSpan={7} className="ops-empty-row">
+                                        No appointments found{query.trim() ? ` matching “${query.trim()}”` : ' for this date'}.
+                                    </td></tr>
+                                ) : rows.slice(0, 200).map((a) => {
+                                    const src = sourcePill(a)
+                                    const canCheckIn = a.status === 'booked' || a.status === 'rescheduled'
+                                    const canCancel = a.status !== 'cancelled' && a.status !== 'completed'
+                                    return (
+                                        <tr key={a.appointment_id} className="ops-row" onClick={() => setSelectedId(a.appointment_id)}>
+                                            <td className="ops-time">{fmtClock(a.time)}</td>
+                                            <td>
+                                                <div className="ops-strong">{patientLabel(a)}</div>
+                                                <div className="ops-faint">{a.patient_phone}</div>
+                                            </td>
+                                            <td className="ops-strong">{a.doctor_name}</td>
+                                            <td>{a.speciality || '—'}</td>
+                                            <td><StatusPill status={a.status} /></td>
+                                            <td><span className={`d-status-pill ${src.cls}`}>{src.label}</span></td>
+                                            <td className="ops-actions-col" onClick={(e) => e.stopPropagation()}>
+                                                <div className="ops-row-actions">
+                                                    <button className="ops-icon-btn" title="View" onClick={() => setSelectedId(a.appointment_id)}>
+                                                        <Eye size={15} />
+                                                    </button>
+                                                    <button className="ops-icon-btn green" title="Check In" disabled={!canCheckIn || !!busy} onClick={() => quickCheckIn(a)}>
+                                                        <UserCheck size={15} />
+                                                    </button>
+                                                    <button className="ops-icon-btn" title="Edit / Reschedule" onClick={() => setSelectedId(a.appointment_id)}>
+                                                        <Pencil size={15} />
+                                                    </button>
+                                                    <button className="ops-icon-btn red" title="Cancel" disabled={!canCancel || !!busy} onClick={() => quickCancel(a)}>
+                                                        <Ban size={15} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="ops-table-foot">
+                        Showing {Math.min(rows.length, 200)} of {rows.length}
+                        {query.trim() ? ' matching appointments' : ` appointments for ${fmtDate(opsDate)}`}
+                    </div>
+                </div>
+
+                {/* ── Right sidebar ── */}
+                <aside className="ops-side">
+                    <section className="ops-panel">
+                        <div className="ops-panel-title"><Stethoscope size={15} /> Doctor Availability</div>
+                        <div className="ops-panel-body ops-doc-list">
+                            {doctors.length === 0 ? (
+                                <div className="ops-faint" style={{ padding: '.4rem' }}>No open slots from this date.</div>
+                            ) : doctors.slice(0, 12).map((d) => {
+                                const slots = d.open_slots ?? 0
+                                const tone = slots === 0 ? 'red' : slots <= 2 ? 'orange' : 'green'
+                                return (
+                                    <div key={d.doctor_id || d.doctor_name} className="ops-doc-row">
+                                        <div className="ops-doc-info">
+                                            <div className="ops-strong">{d.doctor_name}</div>
+                                            <div className="ops-faint">{d.speciality || 'General'}</div>
+                                        </div>
+                                        <div className="ops-doc-slots">
+                                            <StatusDot tone={tone} label={slots > 0 ? `${slots} slots` : 'Full'} />
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </section>
+
+                    <section className="ops-panel">
+                        <div className="ops-panel-title"><Bell size={15} /> Notifications</div>
+                        <div className="ops-panel-body">
+                            {notifications.map((n, i) => (
+                                <div key={i} className={`ops-notif ${n.tone}`}>
+                                    <span className="ops-notif-icon">{n.icon}</span>
+                                    <span>{n.text}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
+                    <section className="ops-panel ai">
+                        <div className="ops-panel-title"><Sparkles size={15} /> AI Insights</div>
+                        <div className="ops-panel-body">
+                            {aiInsights.map((t, i) => (
+                                <div key={i} className="ops-ai-line"><ChevronRight size={13} /><span>{t}</span></div>
+                            ))}
+                        </div>
+                    </section>
+                </aside>
             </div>
 
-            {/* Appointment detail modal */}
+            {/* Bottom quick actions */}
+            <div className="ops-quick-row">
+                <QuickAction icon={<Calendar size={17} />} label="Book Appointment" tone="blue"
+                    href={(doctors[0] && doctors[0].booking_url) || undefined}
+                    onClick={() => setNotice('Open the doctor profile to start a booking.')} />
+                <QuickAction icon={<Search size={17} />} label="Search Patient" tone="green"
+                    onClick={() => { setQuery(''); searchRef.current && searchRef.current.focus() }} />
+                <QuickAction icon={<Stethoscope size={17} />} label="Doctor Schedule" tone="purple"
+                    onClick={() => setNotice('Doctor availability is listed in the right panel.')} />
+                <QuickAction icon={<MessageSquare size={17} />} label="WhatsApp Inbox" tone="teal"
+                    href="https://web.whatsapp.com" />
+            </div>
+
             {selected && (
                 <AppointmentModal
                     appt={selected}
@@ -1039,6 +1213,318 @@ function ReceptionistView({ data, clientId, onChanged }) {
                     onClose={() => setSelectedId(null)}
                 />
             )}
+        </div>
+    )
+}
+
+/* ══════════════════════════ ATTENDER VIEW ══════════════════════════ */
+
+function AttenderView({ data, clientId, onChanged }) {
+    const [opsDate, setOpsDate] = useState(data.ops_date || data.today || '')
+    // Local, optimistic queue state (frontend-only): id -> 'serving' | 'completed' | 'skipped'
+    const [localStatus, setLocalStatus] = useState({})
+    const [notice, setNotice] = useState('')
+
+    // Set of departments the attender has selected; empty = show all.
+    const [selectedDepts, setSelectedDepts] = useState([])
+    const [filterOpen, setFilterOpen] = useState(false)
+    const filterRef = useRef(null)
+
+    const all = data.recent_appointments || []
+    const opsDates = (data.ops_dates && data.ops_dates.length) ? data.ops_dates : [opsDate]
+    const day = useMemo(() => all.filter((a) => a.date === opsDate), [all, opsDate])
+    const allDoctors = data.doctor_availability || []
+
+    const deptOf = (a) => a.speciality || 'General'
+
+    // All departments available to the attender — drawn from the day's appointments
+    // and the doctor roster — sorted by how busy each is today, then alphabetically.
+    const departments = useMemo(() => {
+        const counts = {}
+        day.forEach((a) => { const s = deptOf(a); counts[s] = (counts[s] || 0) + 1 })
+        allDoctors.forEach((d) => { const s = d.speciality || 'General'; if (!(s in counts)) counts[s] = 0 })
+        return Object.entries(counts)
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map((e) => e[0])
+    }, [day, allDoctors])
+
+    // Keep the selection valid if the available departments change.
+    const activeDepts = useMemo(
+        () => selectedDepts.filter((d) => departments.includes(d)),
+        [selectedDepts, departments]
+    )
+    const showAll = activeDepts.length === 0
+    const toggleDept = (d) =>
+        setSelectedDepts((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]))
+
+    const inScope = (a) => showAll || activeDepts.includes(deptOf(a))
+
+    // Close the department filter panel when clicking outside it.
+    useEffect(() => {
+        if (!filterOpen) return undefined
+        const onDown = (e) => {
+            if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false)
+        }
+        document.addEventListener('mousedown', onDown)
+        return () => document.removeEventListener('mousedown', onDown)
+    }, [filterOpen])
+
+    // Doctors belonging to the selected departments (for the room panel).
+    const doctors = useMemo(
+        () => allDoctors.filter((d) => showAll || activeDepts.includes(d.speciality || 'General')),
+        [allDoctors, showAll, activeDepts]
+    )
+
+    const effStatus = useCallback((a) => localStatus[a.appointment_id] || a.status, [localStatus])
+
+    // Queue = arrived patients (checked-in / booked / rescheduled) in-scope, not yet done,
+    // sorted by time. Tokens are assigned in time order so they stay stable within the day.
+    const queue = useMemo(() => {
+        return day
+            .filter((a) => ['booked', 'checked_in', 'rescheduled'].includes(a.status))
+            .filter(inScope)
+            .sort((a, b) => (a.time || '').localeCompare(b.time || ''))
+            .map((a, i) => ({ ...a, token: `A-${String(i + 1).padStart(2, '0')}`, wait: minsSinceTime(a.time) }))
+    }, [day, showAll, activeDepts])
+
+    const visibleQueue = queue.filter((a) => {
+        const s = effStatus(a)
+        return s !== 'completed' && s !== 'skipped' && s !== 'cancelled'
+    })
+
+    const completedCount = queue.filter((a) => effStatus(a) === 'completed').length
+        + day.filter((a) => a.status === 'completed' && inScope(a)).length
+    const checkedInCount = queue.filter((a) => effStatus(a) === 'checked_in' || effStatus(a) === 'serving').length
+    const waitingCount = visibleQueue.filter((a) => effStatus(a) !== 'serving').length
+    const serving = queue.find((a) => effStatus(a) === 'serving') || null
+    const nextInLine = visibleQueue.find((a) => effStatus(a) !== 'serving') || null
+    const avgWait = visibleQueue.length
+        ? Math.round(visibleQueue.reduce((s, a) => s + a.wait, 0) / visibleQueue.length)
+        : 0
+
+    const cards = [
+        { label: 'Patients Waiting', value: waitingCount,   tone: 'orange', icon: <Clock size={16} /> },
+        { label: 'Checked In',       value: checkedInCount, tone: 'blue',   icon: <UserCheck size={16} /> },
+        { label: 'Completed',        value: completedCount, tone: 'green',  icon: <CheckCircle2 size={16} /> },
+        { label: 'Next Token',       value: nextInLine ? nextInLine.token : '—', tone: 'purple', icon: <ChevronRight size={16} /> },
+    ]
+
+    // Room status derived from doctors + who is currently being served
+    const rooms = useMemo(() => {
+        const servingByDoc = {}
+        queue.forEach((a) => { if (effStatus(a) === 'serving') servingByDoc[a.doctor_name] = a })
+        const list = (doctors.length ? doctors : []).slice(0, 12)
+        return list.map((d) => {
+            const isServing = !!servingByDoc[d.doctor_name]
+            const full = (d.open_slots ?? 0) === 0
+            let status = isServing ? 'Busy' : full ? 'Break' : 'Available'
+            const tone = status === 'Available' ? 'green' : status === 'Busy' ? 'orange' : 'gray'
+            return { room: roomForDoctor(d), doctor: d.doctor_name, dept: d.speciality || 'General', status, tone }
+        })
+    }, [doctors, queue, effStatus])
+
+    const aiInsights = useMemo(() => {
+        const tips = []
+        const longWait = visibleQueue.filter((a) => a.wait >= 30)
+        if (longWait.length) tips.push(`${longWait.length} patient${longWait.length > 1 ? 's have' : ' has'} waited over 30 min — prioritise the queue.`)
+        // Room with the most waiting patients
+        const perDoc = {}
+        visibleQueue.forEach((a) => { perDoc[a.doctor_name] = (perDoc[a.doctor_name] || 0) + 1 })
+        const busiest = Object.entries(perDoc).sort((a, b) => b[1] - a[1])[0]
+        if (busiest && busiest[1] >= 3) {
+            const doc = doctors.find((d) => d.doctor_name === busiest[0])
+            const rm = doc ? roomForDoctor(doc) : busiest[0]
+            tips.push(`Room ${rm} has a long queue (${busiest[1]} waiting).`)
+        }
+        if (!tips.length) tips.push('Queue is moving smoothly. No long waits right now.')
+        return tips.slice(0, 3)
+    }, [visibleQueue, doctors])
+
+    const setLocal = (id, s, msg) => {
+        setLocalStatus((prev) => ({ ...prev, [id]: s }))
+        if (msg) setNotice(msg)
+    }
+
+    const markCompleted = async (a) => {
+        // Optimistic local completion; also persist a check-in if not already checked in.
+        setLocal(a.appointment_id, 'completed', `${a.token} · ${patientLabel(a)} marked completed ✅`)
+        if (a.status === 'booked' || a.status === 'rescheduled') {
+            try { await checkInAppointment({ appointment_id: a.appointment_id, client_id: clientId }) } catch (e) { /* non-blocking */ }
+        }
+    }
+
+    return (
+        <div className="ops-view">
+            <div className="ops-cards-row">
+                {cards.map((c) => <OpsCard key={c.label} {...c} />)}
+            </div>
+
+            {notice && (
+                <div className="dash-alert-item info ops-notice">
+                    <Info size={16} /><span>{notice}</span>
+                    <button className="ops-notice-x" onClick={() => setNotice('')}><X size={13} /></button>
+                </div>
+            )}
+
+            <div className="ops-split">
+                {/* ── Patient queue ── */}
+                <div className="ops-main">
+                    <div className="ops-toolbar">
+                        <div className="ops-toolbar-title"><Users size={16} /> Patient Queue · {fmtDate(opsDate)}</div>
+                        <div className="ops-filter" ref={filterRef}>
+                            <button
+                                className={`ops-filter-btn ${!showAll ? 'active' : ''}`}
+                                onClick={() => setFilterOpen((o) => !o)}
+                                title="Filter by department"
+                            >
+                                <Filter size={14} />
+                                Departments
+                                {!showAll && <span className="ops-filter-count">{activeDepts.length}</span>}
+                            </button>
+                            {filterOpen && (
+                                <div className="ops-filter-panel">
+                                    <div className="ops-filter-head">
+                                        <span>Filter by Department</span>
+                                        <button className="ops-filter-x" onClick={() => setFilterOpen(false)}><X size={14} /></button>
+                                    </div>
+                                    <button
+                                        className={`ops-filter-opt all ${showAll ? 'active' : ''}`}
+                                        onClick={() => setSelectedDepts([])}
+                                    >
+                                        <span className="ops-filter-check">{showAll && <CheckCircle2 size={14} />}</span>
+                                        All Departments
+                                    </button>
+                                    <div className="ops-filter-list">
+                                        {departments.map((d) => {
+                                            const on = activeDepts.includes(d)
+                                            return (
+                                                <button
+                                                    key={d}
+                                                    className={`ops-filter-opt ${on ? 'active' : ''}`}
+                                                    onClick={() => toggleDept(d)}
+                                                    title={d}
+                                                >
+                                                    <span className="ops-filter-check">{on && <CheckCircle2 size={14} />}</span>
+                                                    <span className="ops-filter-name">{d}</span>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                    {!showAll && (
+                                        <button className="ops-filter-clear" onClick={() => setSelectedDepts([])}>
+                                            Clear ({activeDepts.length})
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        <div className="ops-toolbar-spacer" />
+                        <select className="ops-select" value={opsDate} onChange={(e) => setOpsDate(e.target.value)}>
+                            {opsDates.map((d) => <option key={d} value={d}>{fmtDate(d)}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="ops-table-scroll">
+                        <table className="ops-table">
+                            <thead>
+                                <tr>
+                                    <th>Token</th>
+                                    <th>Patient</th>
+                                    <th>Doctor</th>
+                                    <th>Room</th>
+                                    <th>Waiting</th>
+                                    <th>Status</th>
+                                    <th className="ops-actions-col">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {visibleQueue.length === 0 ? (
+                                    <tr><td colSpan={7} className="ops-empty-row">No patients in the queue for this date.</td></tr>
+                                ) : visibleQueue.map((a) => {
+                                    const s = effStatus(a)
+                                    const isServing = s === 'serving'
+                                    const doc = doctors.find((d) => d.doctor_name === a.doctor_name)
+                                    const room = doc ? roomForDoctor(doc) : roomForDoctor(a)
+                                    return (
+                                        <tr key={a.appointment_id} className={`ops-row ${isServing ? 'serving' : ''}`}>
+                                            <td><span className="ops-token">{a.token}</span></td>
+                                            <td>
+                                                <div className="ops-strong">{patientLabel(a)}</div>
+                                                <div className="ops-faint">{a.patient_phone}</div>
+                                            </td>
+                                            <td className="ops-strong">{a.doctor_name}</td>
+                                            <td><span className="ops-room">{room}</span></td>
+                                            <td><StatusDot tone={waitTone(a.wait)} label={fmtWait(a.wait)} /></td>
+                                            <td>
+                                                {isServing
+                                                    ? <span className="d-status-pill blue">Serving</span>
+                                                    : <span className="d-status-pill amber">Waiting</span>}
+                                            </td>
+                                            <td className="ops-actions-col">
+                                                <div className="ops-row-actions">
+                                                    <button className="ops-icon-btn blue" title="Call patient" onClick={() => setLocal(a.appointment_id, 'serving', `Now serving ${a.token} · ${patientLabel(a)} 🔔`)}>
+                                                        <Phone size={15} />
+                                                    </button>
+                                                    <button className="ops-icon-btn green" title="Mark completed" onClick={() => markCompleted(a)}>
+                                                        <CheckCircle2 size={15} />
+                                                    </button>
+                                                    <button className="ops-icon-btn" title="Skip" onClick={() => setLocal(a.appointment_id, 'skipped', `${a.token} skipped`)}>
+                                                        <RotateCcw size={15} />
+                                                    </button>
+                                                    <a className="ops-icon-btn teal" title="Notify on WhatsApp" href={whatsappReminderUrl(a)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                                                        <Bell size={15} />
+                                                    </a>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="ops-table-foot">{visibleQueue.length} patient{visibleQueue.length === 1 ? '' : 's'} in queue</div>
+                </div>
+
+                {/* ── Right sidebar ── */}
+                <aside className="ops-side">
+                    <section className="ops-panel">
+                        <div className="ops-panel-title"><DoorClosed size={15} /> Doctor Room Status</div>
+                        <div className="ops-panel-body">
+                            {rooms.length === 0 ? (
+                                <div className="ops-faint" style={{ padding: '.4rem' }}>No room data available.</div>
+                            ) : rooms.map((r) => (
+                                <div key={r.room + r.doctor} className="ops-room-row">
+                                    <span className="ops-room">{r.room}</span>
+                                    <div className="ops-doc-info">
+                                        <div className="ops-strong">{r.doctor}</div>
+                                        <div className="ops-faint">{r.dept}</div>
+                                    </div>
+                                    <StatusDot tone={r.tone} label={r.status} />
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
+                    <section className="ops-panel">
+                        <div className="ops-panel-title"><Layers size={15} /> Queue Summary</div>
+                        <div className="ops-panel-body ops-summary">
+                            <div className="ops-summary-row"><span>Patients waiting</span><strong>{waitingCount}</strong></div>
+                            <div className="ops-summary-row"><span>Avg wait time</span><strong>{fmtWait(avgWait)}</strong></div>
+                            <div className="ops-summary-row"><span>Now serving</span><strong>{serving ? serving.token : '—'}</strong></div>
+                            <div className="ops-summary-row"><span>Next patient</span><strong>{nextInLine ? patientLabel(nextInLine) : '—'}</strong></div>
+                        </div>
+                    </section>
+
+                    <section className="ops-panel ai">
+                        <div className="ops-panel-title"><Sparkles size={15} /> AI Insights</div>
+                        <div className="ops-panel-body">
+                            {aiInsights.map((t, i) => (
+                                <div key={i} className="ops-ai-line"><ChevronRight size={13} /><span>{t}</span></div>
+                            ))}
+                        </div>
+                    </section>
+                </aside>
+            </div>
         </div>
     )
 }
